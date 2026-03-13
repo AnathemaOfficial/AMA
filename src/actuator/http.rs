@@ -34,7 +34,7 @@ pub fn is_private_ip(ip: IpAddr) -> bool {
             v6.is_loopback()           // ::1
             || v6.is_unspecified()     // ::
             // IPv4-mapped IPv6 addresses
-            || v6.to_ipv4_mapped().map_or(false, |v4| {
+            || v6.to_ipv4_mapped().is_some_and(|v4| {
                 v4.is_loopback() || v4.is_private() || v4.is_link_local()
             })
         }

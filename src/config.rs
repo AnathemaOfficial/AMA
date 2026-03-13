@@ -99,6 +99,7 @@ struct RawIntentEntry {
     #[serde(default)]
     working_dir: Option<String>,
     #[serde(default)]
+    #[allow(dead_code)]
     description: Option<String>,
 }
 

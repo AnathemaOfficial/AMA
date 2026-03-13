@@ -124,11 +124,8 @@ fn canonicalize(request: &ActionRequest, config: &AmaConfig) -> Result<Canonical
             for (i, raw_arg) in raw_args.iter().enumerate() {
                 let safe = SafeArg::new(raw_arg)?;
                 if let Some(validator) = intent_config.validators.get(i) {
-                    match validator.as_str() {
-                        "relative_workspace_path" => {
-                            WorkspacePath::new(raw_arg, &config.workspace_root)?;
-                        }
-                        _ => {}
+                    if validator.as_str() == "relative_workspace_path" {
+                        WorkspacePath::new(raw_arg, &config.workspace_root)?;
                     }
                 }
                 args.push(safe);

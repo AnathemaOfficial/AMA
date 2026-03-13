@@ -15,7 +15,7 @@ pub struct ActionRequest {
 }
 
 pub fn validate_magnitude(magnitude: u64) -> Result<(), AmaError> {
-    if magnitude < 1 || magnitude > 1000 {
+    if !(1..=1000).contains(&magnitude) {
         return Err(AmaError::Validation {
             error_class: "invalid_magnitude".into(),
             message: format!("magnitude must be 1-1000, got {}", magnitude),

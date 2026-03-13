@@ -185,10 +185,8 @@ pub fn cleanup_orphan_temps(workspace_root: &Path) -> usize {
     if let Ok(entries) = walkdir(workspace_root) {
         for path in entries {
             if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                if name.contains(".ama.") && name.ends_with(".tmp") {
-                    if fs::remove_file(&path).is_ok() {
-                        cleaned += 1;
-                    }
+                if name.contains(".ama.") && name.ends_with(".tmp") && fs::remove_file(&path).is_ok() {
+                    cleaned += 1;
                 }
             }
         }

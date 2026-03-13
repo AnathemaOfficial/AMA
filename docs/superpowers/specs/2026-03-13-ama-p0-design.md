@@ -61,7 +61,7 @@ AMA is not an agent. It is an adapter, proxy, validator, and minimal actuator.
   - **Cache semantics:** The idempotency cache is authorization-preserving: capacity was already consumed on the first call, so a cached `200` is valid even if subsequent actions have exhausted the remaining capacity.
   - If the original request is still in-flight when a duplicate key arrives, the duplicate is rejected with `409 Conflict`.
   - The cache does NOT survive process restart (session-scoped).
-  - Max cache size: 10,000 entries. Eviction policy: oldest-first beyond TTL, then LRU if size exceeded.
+  - Max cache size: 10,000 entries. Eviction policy: expired entries (beyond TTL) are purged first. If the cache is full and all entries are still within TTL, new requests receive `503 Service Unavailable` — idempotency guarantees are never silently broken by eviction.
 
 ### Limits (P0)
 

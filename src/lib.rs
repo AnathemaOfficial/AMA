@@ -7,3 +7,4 @@ pub mod slime;
 pub mod mapper;
 pub mod actuator;
 pub mod idempotency;
+pub mod audit;

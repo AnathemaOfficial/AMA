@@ -48,3 +48,14 @@ pub enum ActionResult {
         truncated: bool,
     },
 }
+
+impl ActionResult {
+    pub fn is_truncated(&self) -> bool {
+        match self {
+            ActionResult::FileWrite { .. } => false,
+            ActionResult::FileRead { truncated, .. } => *truncated,
+            ActionResult::ShellExec { truncated, .. } => *truncated,
+            ActionResult::HttpResponse { truncated, .. } => *truncated,
+        }
+    }
+}

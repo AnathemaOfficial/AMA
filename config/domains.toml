@@ -1,0 +1,21 @@
+[meta]
+schema_version = "ama-domains-v1"
+max_magnitude_claim = 1000
+
+[domains.file_write]
+domain_id = "fs.write.workspace"
+max_payload_bytes = 1_048_576
+validator = "relative_workspace_path"
+
+[domains.file_read]
+domain_id = "fs.read.workspace"
+validator = "relative_workspace_path"
+
+[domains.shell_exec]
+domain_id = "proc.exec.bounded"
+requires_intent = true
+
+[domains.http_request]
+domain_id = "net.out.http"
+max_payload_bytes = 262_144
+validator = "allowlisted_url"

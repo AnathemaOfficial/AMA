@@ -1,0 +1,28 @@
+[meta]
+schema_version = "ama-intents-v1"
+
+[intents.list_dir]
+binary = "/bin/ls"
+args_template = ["-la", "{{0}}"]
+validators = ["relative_workspace_path"]
+description = "List directory contents"
+
+[intents.read_file_cat]
+binary = "/bin/cat"
+args_template = ["{{0}}"]
+validators = ["relative_workspace_path"]
+description = "Read file contents via cat"
+
+[intents.git_status]
+binary = "/usr/bin/git"
+args_template = ["status"]
+validators = []
+working_dir = "{{workspace_root}}"
+description = "Git status in workspace"
+
+[intents.git_log]
+binary = "/usr/bin/git"
+args_template = ["log", "--oneline", "-20"]
+validators = []
+working_dir = "{{workspace_root}}"
+description = "Recent git history"

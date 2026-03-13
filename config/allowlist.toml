@@ -1,0 +1,16 @@
+[meta]
+schema_version = "ama-allowlist-v1"
+
+[[urls]]
+pattern = "https://api.weather.com/*"
+methods = ["GET"]
+
+[[urls]]
+pattern = "https://api.github.com/*"
+methods = ["GET", "POST"]
+max_body_bytes = 262_144
+
+[[urls]]
+pattern = "https://httpbin.org/*"
+methods = ["GET", "POST"]
+notes = "Testing only"

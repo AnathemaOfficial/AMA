@@ -55,9 +55,13 @@ AMA is not an agent. It is an adapter, proxy, validator, and minimal actuator.
 - **Request `Content-Type`:** `application/json` (required). Else -> `415 Unsupported Media Type`.
 - **Response `Content-Type`:** `application/json` (always).
 - **Encoding:** UTF-8.
-- **`Idempotency-Key`:** **Required** on `POST /ama/action`. Must be a UUID v4, max 128 bytes ASCII.
+- **`Idempotency-Key`:** **Required** on `POST /ama/action`. Must be a well-formed UUID v4 (validated via regex `^[0-9a-f]{8}-...`), max 128 bytes ASCII.
   - Duplicate key within 5-minute window returns cached response without re-execution.
-  - Missing or malformed key -> `400 Bad Request`.
+  - Missing, malformed, or non-UUID-v4 key -> `400 Bad Request`.
+  - **Cache semantics:** The idempotency cache is authorization-preserving: capacity was already consumed on the first call, so a cached `200` is valid even if subsequent actions have exhausted the remaining capacity.
+  - If the original request is still in-flight when a duplicate key arrives, the duplicate is rejected with `409 Conflict`.
+  - The cache does NOT survive process restart (session-scoped).
+  - Max cache size: 10,000 entries. Eviction policy: oldest-first beyond TTL, then LRU if size exceeded.
 
 ### Limits (P0)
 
@@ -65,7 +69,7 @@ AMA is not an agent. It is an adapter, proxy, validator, and minimal actuator.
 |------------------|-------------|-----------------------------------------------------|
 | **Body Max**     | 1 MiB       | Prevents memory exhaustion; sufficient for text files.|
 | **Concurrency**  | 8 connections | Single agent focus; small burst buffer.             |
-| **Rate Limit**   | 60 req/min  | Prevents infinite loops from agents.                |
+| **Rate Limit**   | 60 req/min  | Global (all clients combined). P0 is localhost-only, so per-IP = global. Prevents infinite loops from agents. |
 
 **Timeouts (per action class):**
 
@@ -74,8 +78,7 @@ AMA is not an agent. It is an adapter, proxy, validator, and minimal actuator.
 | `file_write`      | 5s      |
 | `file_read`       | 5s      |
 | `shell_exec`      | 15s     |
-| `http_get`        | 15s     |
-| `http_post`       | 15s     |
+| `http_request`    | 15s     |
 
 **Overload behavior:** Beyond concurrency cap -> immediate `503` rejection. No request queue.
 
@@ -86,6 +89,7 @@ AMA is not an agent. It is an adapter, proxy, validator, and minimal actuator.
 | `200` | Authorized & Executed (or Dry-Run).  | `{"status":"authorized","action_id":"...","dry_run":false,"result":{...}}` |
 | `400` | Malformed JSON, missing fields, wrong types, bad Idempotency-Key. | Minimal error message. |
 | `403` | **Impossible** (AB-S Refusal).       | **STRICT:** `{"status":"impossible"}`. No reason, no codes, no leakage. |
+| `409` | Conflict: duplicate Idempotency-Key with in-flight request. | Minimal error. |
 | `413` | Payload Too Large (> 1 MiB global).  | Minimal error. |
 | `415` | Unsupported Media Type.              | Minimal error. |
 | `422` | Semantic validation error (unknown action, invalid path, URL not allowlisted, magnitude out of bounds, per-domain payload exceeded). | Minimal error message (`error_class` + `message`). |
@@ -160,8 +164,16 @@ Agents submit a universal JSON structure. AMA enforces strict structural validat
 | `target`    | string         | Yes         | Action target: relative file path, shell intent ID, or URL. Format validated per action type. |
 | `magnitude` | u64            | Yes         | Claimed cost units. Range: `1 <= magnitude <= 1000` (P0). Out of bounds -> `422`. AMA MAY reject, clamp, or recompute effective magnitude per domain rules before SLIME authorization. |
 | `dry_run`   | bool           | No          | Default `false`. If `true`, skips actuation step only. |
-| `payload`   | string or null | Conditional | Action data (file content, HTTP body). Null for read-only ops. Max per-domain limit. |
-| `args`      | string[]       | Conditional | For `shell_exec` only. Validated arguments for the intent. Replaces `payload` for shell actions. |
+| `method`    | string         | Conditional | For `http_request` only. Must be `"GET"` or `"POST"` (P0). Required when `action` is `http_request`. Absent or invalid -> `422`. |
+| `payload`   | string or null | Conditional | Action data (file content, HTTP body). Required for `file_write`. Optional for `http_request` (POST body). Null for read-only ops. Max per-domain limit. |
+| `args`      | string[]       | Conditional | For `shell_exec` only. Validated arguments for the intent. |
+
+**Mutual exclusivity:** Exactly one of `payload` or `args` must be present, depending on `action`:
+- `file_write`: `payload` required, `args` forbidden.
+- `file_read`: neither `payload` nor `args`.
+- `shell_exec`: `args` required, `payload` forbidden.
+- `http_request`: `payload` optional (for POST body), `args` forbidden.
+Providing the wrong field for an action class -> `422`.
 
 ### P0 Action Matrix
 
@@ -172,7 +184,7 @@ Agents submit a universal JSON structure. AMA enforces strict structural validat
 | `shell_exec` | **Intent ID**            | `args: [...]`  | **NO RAW SHELL.** Args validated per intent validators before mapping to binary. |
 | `http_request` | Absolute URL           | `payload` (optional) | HTTPS only. URL allowlist + method check. |
 
-**Note:** `http_get` and `http_post` are unified as `http_request` with a `method` field in the internal representation.
+**Note:** `http_get` and `http_post` are unified as `http_request` with a mandatory `method` field in both the input JSON and internal representation.
 
 ### Internal Representation (Rust Enum)
 
@@ -323,7 +335,7 @@ description = "Recent git history"
 - `binary` MUST be an absolute path to an executable.
 - `args_template` uses `{{N}}` for positional argument substitution.
 - `validators[N]` validates `{{N}}` — positional mapping is strict.
-- Number of placeholders MUST match the number of expected arguments.
+- Number of placeholders MUST exactly match the number of provided arguments: `args.len() != placeholder_count` -> `422`. Both too few AND too many arguments are rejected.
 - No extra arguments accepted. No unresolved placeholders may survive.
 - If any argument fails its validator, the command vector is **never constructed**. Request returns `422`.
 - Arguments are constructed via **safe vector concatenation of typed values**, never string interpolation.
@@ -435,7 +447,7 @@ The Actuator is the final mechanical stage. It executes ONLY if authorized by SL
 | Max size                | 1 MiB (verified before write).                      |
 | Directory creation      | `mkdir -p` implicit. Permissions: `0755`.           |
 | Overwrite               | Allowed (last-rename-wins).                         |
-| Atomicity               | Write to `.ama.tmp`, then `rename()`.               |
+| Atomicity               | Write to `<target>.ama.<action_id>.tmp`, then `rename()`. Unique temp per action prevents concurrent write corruption. |
 | File permissions        | `0644` (`rw-r--r--`).                               |
 | Encoding                | P0 FileWrite is text-only. Valid UTF-8 enforced.    |
 | Result                  | `{ bytes_written: u64 }`                            |
@@ -446,18 +458,18 @@ The Actuator is the final mechanical stage. It executes ONLY if authorized by SL
 2. Verify **every path component** is not a symlink (`lstat`).
 3. Verify target is a regular file or does not yet exist.
 4. Create parent directories if needed (`0755`).
-5. Write to `<target>.ama.tmp`.
+5. Write to `<target>.ama.<action_id>.tmp` (unique per action, prevents concurrent corruption).
 6. Atomic `rename()` to `<target>`.
 7. Return `bytes_written`.
 
-**Cleanup:** If write fails mid-operation, `.ama.tmp` is deleted. No orphan files.
+**Cleanup:** If write fails mid-operation, the `.ama.<action_id>.tmp` file is deleted. No orphan files.
 
 ### 5.2 — File Read
 
 | Rule                | P0 Value                                     |
 |---------------------|-----------------------------------------------|
 | Paths accepted      | Relative, under `workspace_root`, no symlinks.|
-| File must exist     | Yes. Absent -> `422`.                         |
+| File must exist     | Yes. Absent -> `503` (actuation failure). File existence is checked at actuation time (step 7), not at validation time. Capacity IS consumed even if the file does not exist, because AB-S authorization (step 6) occurs before actuation. |
 | Target type         | Regular files only.                           |
 | Max returned        | 512 KiB (bounded reading — stop at cap).      |
 | Encoding            | UTF-8 enforced. Non-UTF-8 -> `422`.           |
@@ -504,7 +516,7 @@ The Actuator is the final mechanical stage. It executes ONLY if authorized by SL
 | Cookies             | Disabled. No HTTP state.                          |
 | Streaming           | No. Complete buffered response.                   |
 
-**DNS rebinding protection:** DNS resolution MUST be performed at request time and validated against the IP safety policy before every connection. After connection establishment, the remote IP MUST be re-validated.
+**DNS rebinding protection:** DNS resolution MUST be performed at request time with DNS caching disabled (or TTL=0). The resolved IP MUST be validated against the IP safety policy before connection. After connection establishment, the **actual TCP peer IP** (not a separate DNS lookup) MUST be re-validated. This prevents DNS rebinding attacks where DNS returns a safe IP initially but the connection goes to a different IP.
 
 ### 5.5 — Transversal Rules
 
@@ -512,7 +524,7 @@ The Actuator is the final mechanical stage. It executes ONLY if authorized by SL
 |---------------------|---------------------------------------------------|
 | **Fail-Closed**    | Any unexpected error during actuation -> `503`. No partial results fabricated. |
 | **No Retry**       | AMA never retries a failed actuation. Agent must resubmit. |
-| **Cleanup**        | Failed writes delete `.ama.tmp`. No orphan files.  |
+| **Cleanup**        | Failed writes delete `.ama.<action_id>.tmp`. No orphan files. |
 | **Concurrency**    | No file locking in P0. Concurrent outcomes are timing-dependent (last successful atomic rename wins). |
 | **Logging**        | Metadata-only per action. See Audit section below. |
 
@@ -676,6 +688,58 @@ max_magnitude_per_action = 200
 
 **Closed World Assumption:** Any domain ID not listed explicitly is structurally `Impossible`. No domains can be added at runtime.
 
+#### `config.toml` Formal Schema
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `ama.workspace_root` | string (absolute path) | **Yes** | — | Absolute path to workspace. Must exist and be a directory at startup. |
+| `ama.bind_host` | string (IP) | No | `"127.0.0.1"` | Bind address. P0 MUST be `127.0.0.1`. |
+| `ama.bind_port` | u16 | No | `8787` | Listen port. |
+| `ama.log_level` | string | No | `"info"` | One of: `error`, `warn`, `info`, `debug`, `trace`. |
+| `ama.log_output` | string | No | `"stderr"` | Log destination: `"stderr"` or `"file:<path>"`. |
+| `slime.mode` | string | **Yes** | — | Must be `"embedded"` for P0. |
+| `slime.max_capacity` | u64 | **Yes** | — | Global capacity ceiling. Must be > 0. |
+| `slime.domains.<domain_key>.enabled` | bool | **Yes** | — | Whether this domain accepts actions. |
+| `slime.domains.<domain_key>.max_magnitude_per_action` | u64 | **Yes** | — | Per-action magnitude cap. Must be > 0 and <= `max_capacity`. |
+
+**Domain ID normalization:** TOML keys use underscores (`fs_write_workspace`), which map to dotted domain IDs (`fs.write.workspace`) via automatic `_` → `.` conversion at load time. The canonical form used in code, logs, and `domains.toml` is dotted: `fs.write.workspace`. The underscore form exists only because TOML keys cannot contain dots.
+
+#### Startup Validation Rules
+
+AMA MUST refuse to start (exit non-zero) if ANY of the following conditions are met:
+1. Any configuration file (`config.toml`, `domains.toml`, `intents.toml`, `allowlist.toml`) is absent or unparseable.
+2. Any `schema_version` field is unrecognized (unknown version -> refuse to start).
+3. `workspace_root` does not exist, is not a directory, or is not an absolute path.
+4. Any domain referenced in `domains.toml` has no corresponding entry in `config.toml`'s `[slime.domains]`.
+5. Any intent in `intents.toml` references a `binary` that does not exist or is not executable.
+6. `bind_host` is anything other than `127.0.0.1` in P0.
+7. Any internal inconsistency between config files (e.g., action referencing non-existent domain).
+
+On startup failure, AMA MUST log the specific validation error and exit. No partial operation is permitted.
+
+#### Graceful Shutdown
+
+On `SIGTERM` (or equivalent platform signal):
+1. Stop accepting new connections immediately.
+2. Wait up to 5 seconds for in-flight requests to complete.
+3. Send `SIGKILL` to any shell_exec child process groups still alive.
+4. Flush audit log buffer.
+5. Exit.
+
+On `SIGKILL` or crash: no cleanup guaranteed. Orphan `.ama.<action_id>.tmp` files may remain (cleaned on next startup).
+
+#### Platform Target
+
+P0 targets **Linux** as the primary platform. POSIX-specific APIs (`setpgid`, `execv`, `lstat`, `SIGTERM`, `SIGKILL`) are used directly. macOS is expected to work with minimal changes. **Windows** is NOT a P0 target for the actuator layer — the AMA binary compiles on Windows for development, but shell_exec and POSIX process isolation features are Linux-only.
+
+#### Magnitude Semantics
+
+Magnitude is **agent-declared and AMA-validated**. The agent claims a cost, and AMA enforces bounds:
+- Range: `1 <= magnitude <= domain.max_magnitude_per_action`.
+- AMA does NOT recompute magnitude from action properties in P0 (e.g., file size does not auto-set magnitude).
+- The agent is responsible for declaring reasonable magnitudes. An agent declaring `magnitude: 1` for every action is allowed but will exhaust capacity faster than an agent declaring proportional values.
+- P1 MAY introduce AMA-computed magnitude overrides (e.g., `magnitude = max(declared, file_size_kb)`).
+
 ### Observability (Read-Only)
 
 `GET /ama/status`:
@@ -739,7 +803,7 @@ All incoming HTTP requests to AMA are untrusted input, regardless of origin (loc
 | **Capacity Overflow**     | CAS with `checked_add`. `capacity` NEVER exceeds `max_capacity`. | Structural Impossibility |
 | **Unknown Domain**        | Closed World Assumption. Absent domain -> `Impossible`, never error. | Structural Impossibility |
 | **Policy Fuzzing**        | `403` returns strictly `{"status":"impossible"}`. Zero leakage. | Opacity |
-| **Partial Write**         | Atomic `.tmp` + `rename()`. Crash = no file or old file.  | Atomicity                   |
+| **Partial Write**         | Atomic `.ama.<action_id>.tmp` + `rename()`. Crash = no file or old file. | Atomicity                   |
 | **Orphan Processes**      | `setpgid` + kill to process group. Best-effort containment. | Containment |
 | **Environment Leakage**   | Fresh minimal env. No host variables inherited.           | Isolation                   |
 | **TLS Downgrade**         | HTTPS required + certificate validation enforced.        | Enforcement                 |
@@ -768,7 +832,10 @@ These invariants MUST hold true at all times during AMA execution. Violation is 
 3. **Capacity Hard Limit:** `capacity` NEVER exceeds `max_capacity`. Guaranteed by hardware atomic CAS.
 4. **Closed World:** Any unknown `domain_id` or intent returns `Impossible`. Never `Error`, never `Authorized`.
 5. **Zero Leakage:** A `403` verdict reveals nothing about the policy state.
-6. **Fail-Closed:** Any unexpected error (I/O, panic, timeout, external dependency failure) results in no actuation. External dependency failure = `Impossible`, not `Error`.
+6. **Fail-Closed:** Any unexpected error results in no actuation. Specifically:
+   - **Pre-actuation errors** (SLIME/AB-S unavailability, config loading failure): Return `Impossible` (`403`), not `Error`.
+   - **Actuator I/O errors** (filesystem inaccessible, process spawn failure, network error during HTTP): Return `503`. These are distinct from policy refusals.
+   - In both cases: no actuation occurs.
 7. **Static Law:** Configuration files are loaded once at startup and never reloaded at runtime. Change requires restart.
 8. **Boot Integrity:** SHA-256 hashes of all loaded configuration files (`config.toml`, `domains.toml`, `intents.toml`, `allowlist.toml`) are computed and logged at startup to establish a cryptographic audit baseline.
 
@@ -839,9 +906,9 @@ AMA/
 {
   "adapter": "langchain",
   "action": "http_request",
+  "method": "GET",
   "target": "https://api.weather.com/current",
-  "magnitude": 1,
-  "payload": null
+  "magnitude": 1
 }
 ```
 

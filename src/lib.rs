@@ -4,3 +4,4 @@ pub mod canonical;
 pub mod schema;
 pub mod config;
 pub mod slime;
+pub mod mapper;

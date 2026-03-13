@@ -9,3 +9,4 @@ pub mod actuator;
 pub mod idempotency;
 pub mod audit;
 pub mod pipeline;
+pub mod server;

@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 description = "Agent Machine Armor — Deterministic security membrane for AI agents"
 
+[features]
+test-utils = ["dep:axum-test"]
+
 [dependencies]
 axum = "0.8"
 tokio = { version = "1", features = ["full"] }
@@ -20,11 +23,16 @@ dashmap = "6"
 tower = { version = "0.5", features = ["limit"] }
 tower-http = { version = "0.6", features = ["limit"] }
 bytes = "1"
+axum-test = { version = "17", optional = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
 [dev-dependencies]
-axum-test = "16"
+axum-test = "17"
 tempfile = "3"
 tokio = { version = "1", features = ["full", "test-util"] }
+
+[[test]]
+name = "test_integration"
+required-features = ["test-utils"]

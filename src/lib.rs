@@ -6,3 +6,4 @@ pub mod config;
 pub mod slime;
 pub mod mapper;
 pub mod actuator;
+pub mod idempotency;

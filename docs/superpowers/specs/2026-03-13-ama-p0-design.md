@@ -133,6 +133,8 @@ When `"dry_run": true`:
 
 **Normative rule:** `dry_run` MUST still pass all local validation and AB-S authorization checks; only final actuation is skipped.
 
+**Capacity ordering invariant:** In `dry_run` mode, AB-S authorization is evaluated but capacity reservation (`try_reserve`) MUST NOT occur. The pipeline MUST check `dry_run` **before** invoking `try_reserve()`. This prevents dry-run probes from consuming real capacity while still providing accurate authorization feedback.
+
 ### Failure Mode
 
 - **Fail-Closed:** If AB-S is unreachable or any unexpected error occurs, AMA MUST return `503` and MUST NOT perform any actuation.

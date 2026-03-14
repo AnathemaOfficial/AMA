@@ -19,8 +19,18 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 use tower::ServiceBuilder;
+use tower::timeout::TimeoutLayer;
 use tower_http::limit::RequestBodyLimitLayer;
+use axum::error_handling::HandleErrorLayer;
 use uuid::Uuid;
+
+/// Rate limiter window state — protected by a single mutex to prevent
+/// the C3 race condition where counter increment and window reset
+/// were not atomic.
+pub struct RateLimitState {
+    pub window_start: Instant,
+    pub count: u64,
+}
 
 /// Shared application state wrapped in Arc for thread-safe access.
 pub struct AppState {
@@ -30,8 +40,7 @@ pub struct AppState {
     pub session_id: Uuid,
     pub start_time: Instant,
     pub domain_counters: HashMap<String, AtomicU64>,
-    pub request_counter: AtomicU64,
-    pub rate_limit_window_start: std::sync::Mutex<Instant>,
+    pub rate_limiter: std::sync::Mutex<RateLimitState>,
 }
 
 impl AppState {
@@ -57,8 +66,10 @@ impl AppState {
             session_id: Uuid::new_v4(),
             start_time: Instant::now(),
             domain_counters,
-            request_counter: AtomicU64::new(0),
-            rate_limit_window_start: std::sync::Mutex::new(Instant::now()),
+            rate_limiter: std::sync::Mutex::new(RateLimitState {
+                window_start: Instant::now(),
+                count: 0,
+            }),
             config,
         })
     }
@@ -72,7 +83,15 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/version", get(handle_version))
         .layer(
             ServiceBuilder::new()
+                .layer(HandleErrorLayer::new(|_: tower::BoxError| async {
+                    (
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        Json(json!({"status": "error", "error_class": "timeout",
+                            "message": "request exceeded 30s global deadline"})),
+                    )
+                }))
                 .layer(RequestBodyLimitLayer::new(1_048_576))
+                .layer(TimeoutLayer::new(std::time::Duration::from_secs(30)))
                 .concurrency_limit(8)
         )
         .layer(middleware::from_fn_with_state(
@@ -99,19 +118,22 @@ async fn content_type_middleware(
     next.run(req).await
 }
 
+/// P1 fix (C3): window_start and counter are now under the same mutex.
+/// No gap between window reset and counter increment.
 fn check_rate_limit(state: &AppState) -> bool {
-    let mut window_start = state.rate_limit_window_start.lock().unwrap();
+    let mut rl = state.rate_limiter.lock().unwrap();
     let now = Instant::now();
-    let elapsed = now.duration_since(*window_start);
+    let elapsed = now.duration_since(rl.window_start);
 
     if elapsed.as_secs() >= 60 {
-        *window_start = now;
-        state.request_counter.store(1, Ordering::SeqCst);
+        // New window — reset counter atomically with window start
+        rl.window_start = now;
+        rl.count = 1;
         return true;
     }
 
-    let count = state.request_counter.fetch_add(1, Ordering::SeqCst);
-    count < 60
+    rl.count += 1;
+    rl.count <= 60
 }
 
 fn increment_domain_counter(state: &AppState, domain_id: &str) {
@@ -224,10 +246,18 @@ async fn handle_action(
     let request: ActionRequest = match serde_json::from_slice(&body) {
         Ok(r) => r,
         Err(e) => {
-            state.idempotency_cache.remove(&idem_key);
-            return AmaError::BadRequest {
-                message: format!("invalid JSON: {}", e),
-            }.into_response();
+            // P1 Model A: commit error as terminal result, do not remove.
+            // This ensures retry with same key replays the error.
+            let error_response = json!({
+                "status": "error",
+                "error_class": "bad_request",
+                "message": format!("invalid JSON: {}", e),
+            });
+            state.idempotency_cache.complete(
+                idem_key,
+                serde_json::to_string(&error_response).unwrap(),
+            );
+            return (StatusCode::BAD_REQUEST, Json(error_response)).into_response();
         }
     };
 
@@ -265,7 +295,30 @@ async fn handle_action(
             ).into_response()
         }
         Err(e) => {
-            state.idempotency_cache.remove(&idem_key);
+            // P1 Model A: commit error as terminal result, do not remove.
+            // All terminal outcomes (denial, timeout, failure) go to DONE.
+            // Retry with same key will replay the cached error response.
+            //
+            // Build JSON for caching BEFORE consuming `e` with into_response().
+            let cached_json = match &e {
+                AmaError::Impossible => json!({"status": "impossible"}),
+                AmaError::BadRequest { message } => {
+                    json!({"status": "error", "error_class": "bad_request", "message": message})
+                }
+                AmaError::Validation { error_class, message } => {
+                    json!({"status": "error", "error_class": error_class, "message": message})
+                }
+                AmaError::ServiceUnavailable { message } => {
+                    json!({"status": "error", "error_class": "service_unavailable", "message": message})
+                }
+                other => {
+                    json!({"status": "error", "message": other.to_string()})
+                }
+            };
+            state.idempotency_cache.complete(
+                idem_key,
+                serde_json::to_string(&cached_json).unwrap(),
+            );
             e.into_response()
         }
     }

@@ -1,7 +1,7 @@
-# AMA P0 — Known Issues for P1
+# AMA — Known Issues
 
-> Findings from final code review (2026-03-13). All are out-of-scope for P0
-> (localhost-only, `127.0.0.1`, `max_concurrency: 8`). To be addressed in P1 hardening.
+> Updated 2026-03-14 after P1 completion.
+> C2 and C3 were resolved in P1. C1 and I1–I6 remain open for P2+.
 
 ---
 
@@ -21,30 +21,44 @@ starts with the canonicalized `workspace_root`. Add Windows symlink/junction det
 
 ---
 
-## C2. Idempotency Cache — Non-Atomic Check-or-Insert
+## ~~C2. Idempotency Cache — Non-Atomic Check-or-Insert~~ ✅ RESOLVED
 
 **File:** `src/idempotency.rs`, `check_or_insert()`
 
-The read (`.get()`) and write (`.insert()`) are separate DashMap operations without a
+**Status:** Fixed in P1 WS1 (2026-03-14)
+
+The read (`.get()`) and write (`.insert()`) were separate DashMap operations without a
 held shard lock across both. Two concurrent requests with the same idempotency key could
 both see `New` and both proceed, defeating idempotency.
 
-**P1 fix:** Use `DashMap::entry()` API which holds the shard lock for the duration,
-guaranteeing atomicity of the check-then-insert operation.
+**Fix applied:** Replaced check-then-insert with `DashMap::entry()` API which holds the
+shard lock for the duration, guaranteeing atomicity of the ABSENT → IN_FLIGHT transition.
+Also fixed a potential deadlock where `len()`/`retain()` were called while holding an
+entry lock (DashMap shard locks are not reentrant).
+
+**Validation:** 8 P1 tests in `tests/p1_idempotency.rs` including concurrent race tests
+with 10 threads + barrier. Bug was reproduced (2 threads won ownership) before fix, then
+confirmed resolved. 76/76 tests pass, clippy clean.
 
 ---
 
-## C3. Rate Limiter Race Condition
+## ~~C3. Rate Limiter Race Condition~~ ✅ RESOLVED
 
 **File:** `src/server.rs`, `check_rate_limit()`
 
-The rate limiter reads `window_start` under a mutex, then separately does `fetch_add` on
-the atomic counter. Interleaving between mutex release and atomic increment can cause
-double-counting on window reset.
+**Status:** Fixed in P1 WS4 (2026-03-14)
 
-**P1 fix:** Use a single mutex protecting both the window timestamp and counter, or
-replace with a proper token bucket. For P0 with 8 max concurrency on localhost, the
-practical impact is negligible.
+The rate limiter used a `Mutex<Instant>` for window_start and a separate `AtomicU64` for
+the counter. The gap between mutex release and `fetch_add` allowed interleaving where
+counter increments could straddle a window reset.
+
+**Fix applied:** Replaced separate `Mutex<Instant>` + `AtomicU64` with a single
+`Mutex<RateLimitState>` containing both `window_start` and `count`. Window reset and
+counter increment now happen atomically under the same lock.
+
+**Validation:** 3 rate limiter tests in `tests/p1_rate_limit.rs`. Sequential tests confirm
+limit enforcement. Concurrent race is architecturally eliminated (single mutex). 83/83
+tests pass, clippy clean.
 
 ---
 
@@ -61,4 +75,4 @@ practical impact is negligible.
 
 ---
 
-*P0 scope: deterministic, local-only, single-agent. P1 = concurrency hardening + cross-platform path safety.*
+*P0: deterministic, local-only, single-agent. P1: concurrency hardening (HELD 2026-03-14). P2: cross-platform path safety + multi-adapter + OpenClaw.*

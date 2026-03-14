@@ -1,6 +1,6 @@
 [package]
 name = "ama"
-version = "0.1.0"
+version = "0.1.0-p1-held"
 edition = "2021"
 description = "Agent Machine Armor — Deterministic security membrane for AI agents"
 
@@ -35,4 +35,20 @@ tokio = { version = "1", features = ["full", "test-util"] }
 
 [[test]]
 name = "test_integration"
+required-features = ["test-utils"]
+
+[[test]]
+name = "p1_timeouts"
+required-features = ["test-utils"]
+
+[[test]]
+name = "p1_rate_limit"
+required-features = ["test-utils"]
+
+[[test]]
+name = "p1_queue"
+required-features = ["test-utils"]
+
+[[test]]
+name = "p1_adversarial"
 required-features = ["test-utils"]

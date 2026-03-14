@@ -1,5 +1,6 @@
 use crate::errors::AmaError;
 use dashmap::DashMap;
+use dashmap::mapref::entry::Entry;
 use std::time::{Duration, Instant};
 use uuid::Uuid;
 
@@ -62,36 +63,60 @@ impl IdempotencyCache {
     }
 
     /// Check if key exists. If new, insert as in-flight.
+    ///
+    /// P1 fix: uses DashMap::entry() API for atomic ABSENT → IN_FLIGHT
+    /// transition. This guarantees that exactly one thread wins execution
+    /// ownership under concurrent submission (Invariant I1/I2).
+    ///
+    /// IMPORTANT: No calls to self.entries.len(), self.entries.remove(),
+    /// or self.purge_expired() may occur while an entry() lock is held,
+    /// as DashMap shard locks are not reentrant and this would deadlock.
     pub fn check_or_insert(&self, key: Uuid) -> IdempotencyStatus {
-        // Check existing entry first
-        if let Some(entry) = self.entries.get(&key) {
-            if entry.created_at.elapsed() > self.ttl {
-                // Expired — remove and treat as new
-                drop(entry);
-                self.entries.remove(&key);
-            } else if entry.in_flight {
-                return IdempotencyStatus::InFlight;
-            } else if let Some(ref result) = entry.result {
-                return IdempotencyStatus::Cached(result.clone());
+        // Purge expired entries and snapshot capacity BEFORE taking
+        // the entry lock. This avoids deadlock from calling len() or
+        // retain() while holding a shard write-lock.
+        self.purge_expired();
+        let at_capacity = self.entries.len() >= self.max_entries;
+
+        // Atomic reservation via entry() API — check + insert under
+        // the same shard lock. No gap between check and insert.
+        match self.entries.entry(key) {
+            Entry::Occupied(mut occupied) => {
+                let entry = occupied.get();
+                if entry.created_at.elapsed() > self.ttl {
+                    // Expired — overwrite in-place as new IN_FLIGHT.
+                    // We reuse the occupied slot to avoid dropping the
+                    // lock and re-acquiring (which would create a race).
+                    let entry = occupied.get_mut();
+                    entry.result = None;
+                    entry.created_at = Instant::now();
+                    entry.in_flight = true;
+                    IdempotencyStatus::New
+                } else if entry.in_flight {
+                    IdempotencyStatus::InFlight
+                } else if let Some(ref result) = entry.result {
+                    IdempotencyStatus::Cached(result.clone())
+                } else {
+                    // Defensive: in_flight=false but no result
+                    IdempotencyStatus::InFlight
+                }
+            }
+            Entry::Vacant(vacant) => {
+                // Check capacity (fail-closed: 503 if full).
+                // Uses pre-computed snapshot to avoid deadlock.
+                if at_capacity {
+                    return IdempotencyStatus::Full;
+                }
+
+                // Atomic ABSENT → IN_FLIGHT: we are the sole owner
+                vacant.insert(CacheEntry {
+                    result: None,
+                    created_at: Instant::now(),
+                    in_flight: true,
+                });
+                IdempotencyStatus::New
             }
         }
-
-        // Purge expired entries before checking capacity
-        self.purge_expired();
-
-        // Check capacity (fail-closed: 503 if full and all within TTL)
-        if self.entries.len() >= self.max_entries {
-            return IdempotencyStatus::Full;
-        }
-
-        // Insert as in-flight
-        self.entries.insert(key, CacheEntry {
-            result: None,
-            created_at: Instant::now(),
-            in_flight: true,
-        });
-
-        IdempotencyStatus::New
     }
 
     /// Mark a key as completed with its cached result.
@@ -102,7 +127,13 @@ impl IdempotencyCache {
         }
     }
 
-    /// Remove a key (e.g., on processing failure — allow retry).
+    /// Remove a key from the cache.
+    ///
+    /// WARNING (P1): Under Model A, all terminal outcomes (including
+    /// failures, timeouts, denials) should be committed via complete(),
+    /// NOT removed. This method should only be used for internal cleanup
+    /// (e.g., TTL eviction). Using remove() after a failure allows
+    /// duplicate execution on retry, violating Invariant I2.
     pub fn remove(&self, key: &Uuid) {
         self.entries.remove(key);
     }

@@ -1,0 +1,7 @@
+{
+  "adapter": "openclaw",
+  "action": "file_write",
+  "target": "reports/weekly.md",
+  "magnitude": 1,
+  "payload": "# Weekly Report\n\nAll systems nominal."
+}

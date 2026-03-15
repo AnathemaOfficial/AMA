@@ -12,22 +12,22 @@ Agent → AMA → SLIME/AB-S → Real world actuation
 
 ## Status
 
-**AMA P0 — HELD** (Canonical Local Baseline)
+**AMA P1 — HELD** (Concurrent Multi-Agent Baseline)
 
-P0 validates the full end-to-end architecture:
-**validate → map → authorize → actuate**, with bounded localhost serving,
-structured audit, and closed-world authorization.
+- **P0** validated the full pipeline: **validate → map → authorize → actuate**
+- **P1** hardened for concurrent multi-agent use: idempotency races (C2), rate limiter races (C3), bounded admission, execution timeouts
+- **94 tests**, clippy clean (`-D warnings`)
+- Tags: `v0.1.0-p0-held`, `v0.1.0-p1-held`
 
-P0 is not the final hardened release. Known concurrency and path-safety issues
-are documented in [`docs/KNOWN_ISSUES_P1.md`](docs/KNOWN_ISSUES_P1.md) and
-explicitly deferred to P1.
+Known issues documented in [`docs/KNOWN_ISSUES_P1.md`](docs/KNOWN_ISSUES_P1.md).
 
 ## Architecture
 
 ```
 POST /ama/action
     │
-    ├─ Ingress: JSON schema validation, field exclusivity
+    ├─ Ingress: Rate limit, body limit, idempotency check
+    ├─ Schema:  JSON validation, field exclusivity
     ├─ Mapper:  action → domain_id (via domains.toml)
     ├─ SLIME:   binary authorization (Authorized / Impossible)
     ├─ Actuator: file write/read, shell exec, HTTP request
@@ -40,6 +40,9 @@ POST /ama/action
 - **Finite action universe** — bounded, enumerable transition space
 - **Correctness by construction** — Rust newtypes with private constructors
 - **Thermodynamic capacity** — monotonic entropy via AtomicU64 CAS
+- **Idempotent** — UUID v4 deduplication, atomic DashMap entry API
+
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for full details.
 
 ## Stack
 
@@ -59,15 +62,36 @@ cargo build --release
 |--------|------|-------------|
 | GET | `/ama/health` | Liveness check |
 | GET | `/ama/version` | Version info |
-| GET | `/ama/status` | Runtime metrics |
+| GET | `/ama/status` | Runtime metrics (capacity, domains) |
 | POST | `/ama/action` | Execute action (requires `Idempotency-Key` header) |
+
+## Quick Example
+
+```bash
+curl -X POST http://127.0.0.1:8787/ama/action \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: $(uuidgen)" \
+  -d '{"adapter":"generic","action":"file_write","target":"hello.txt","magnitude":1,"payload":"hello world"}'
+```
+
+See [`examples/`](examples/) for more.
 
 ## Tests
 
 ```bash
-cargo test --features test-utils    # 68 tests
+cargo test --features test-utils    # 94 tests
 cargo clippy --features test-utils -- -D warnings
 ```
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | System architecture and design decisions |
+| [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md) | Threat model and security invariants |
+| [`docs/KNOWN_ISSUES_P1.md`](docs/KNOWN_ISSUES_P1.md) | Known issues and resolution status |
+| [`docs/p1/`](docs/p1/) | P1 workstream documentation |
+| [`docs/superpowers/specs/`](docs/superpowers/specs/) | Design specifications |
 
 ## License
 

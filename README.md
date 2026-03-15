@@ -71,4 +71,4 @@ cargo clippy --features test-utils -- -D warnings
 
 ## License
 
-Proprietary — SYF Corp.
+Proprietary — SYFCORP.

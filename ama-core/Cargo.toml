@@ -1,6 +1,6 @@
 [package]
 name = "ama-core"
-version = "0.2.0-p2-dev"
+version = "0.2.0-p2-held"
 edition = "2021"
 description = "AMA core library — deterministic security membrane for AI agents (no HTTP)"
 

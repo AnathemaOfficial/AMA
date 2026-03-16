@@ -13,7 +13,7 @@ dependencies = [
 
 [[package]]
 name = "ama-core"
-version = "0.2.0-p2-dev"
+version = "0.2.0-p2-held"
 dependencies = [
  "bytes",
  "dashmap",
@@ -32,7 +32,7 @@ dependencies = [
 
 [[package]]
 name = "ama-daemon"
-version = "0.2.0-p2-dev"
+version = "0.2.0-p2-held"
 dependencies = [
  "ama-core",
  "axum",

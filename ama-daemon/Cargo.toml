@@ -1,6 +1,6 @@
 [package]
 name = "ama-daemon"
-version = "0.2.0-p2-dev"
+version = "0.2.0-p2-held"
 edition = "2021"
 description = "AMA HTTP daemon — axum wrapper for ama-core"
 
@@ -44,4 +44,16 @@ required-features = ["test-utils"]
 
 [[test]]
 name = "p1_adversarial"
+required-features = ["test-utils"]
+
+[[test]]
+name = "p2_agent_routing"
+required-features = ["test-utils"]
+
+[[test]]
+name = "p2_rate_limit"
+required-features = ["test-utils"]
+
+[[test]]
+name = "p2_adversarial"
 required-features = ["test-utils"]

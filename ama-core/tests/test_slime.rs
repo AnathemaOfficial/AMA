@@ -1,3 +1,4 @@
+use ama_core::config::DomainPolicy;
 use ama_core::slime::*;
 use std::sync::Arc;
 use std::thread;

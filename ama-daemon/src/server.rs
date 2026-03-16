@@ -53,12 +53,9 @@ impl AppState {
     pub fn new(config: AmaConfig) -> Arc<Self> {
         let max_capacity = config.max_capacity;
 
-        let slime_domains: Vec<(ama_core::slime::DomainId, ama_core::slime::DomainPolicy)> =
+        let slime_domains: Vec<(ama_core::slime::DomainId, ama_core::config::DomainPolicy)> =
             config.domain_policies.iter().map(|(id, policy)| {
-                (id.clone(), ama_core::slime::DomainPolicy {
-                    enabled: policy.enabled,
-                    max_magnitude_per_action: policy.max_magnitude_per_action,
-                })
+                (id.clone(), policy.clone())
             }).collect();
 
         let mut domain_counters = HashMap::new();

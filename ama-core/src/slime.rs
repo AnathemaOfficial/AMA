@@ -1,3 +1,4 @@
+use crate::config::DomainPolicy;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use uuid::Uuid;
@@ -6,12 +7,6 @@ use uuid::Uuid;
 pub enum SlimeVerdict {
     Authorized,
     Impossible,
-}
-
-#[derive(Debug, Clone)]
-pub struct DomainPolicy {
-    pub enabled: bool,
-    pub max_magnitude_per_action: u64,
 }
 
 pub type DomainId = String;

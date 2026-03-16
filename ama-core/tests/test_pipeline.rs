@@ -1,5 +1,5 @@
-use ama::pipeline::validate_field_exclusivity;
-use ama::schema::ActionRequest;
+use ama_core::pipeline::validate_field_exclusivity;
+use ama_core::schema::ActionRequest;
 
 fn make_request(action: &str, payload: Option<String>, args: Option<Vec<String>>, method: Option<String>) -> ActionRequest {
     ActionRequest {

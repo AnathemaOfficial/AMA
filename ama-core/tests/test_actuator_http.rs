@@ -1,4 +1,4 @@
-use ama::actuator::http::*;
+use ama_core::actuator::http::*;
 
 #[tokio::test]
 async fn rejects_loopback_ip() {

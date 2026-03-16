@@ -1,5 +1,5 @@
-use ama::actuator::file::*;
-use ama::newtypes::*;
+use ama_core::actuator::file::*;
+use ama_core::newtypes::*;
 use tempfile::TempDir;
 use std::fs;
 

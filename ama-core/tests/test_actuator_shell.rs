@@ -1,6 +1,6 @@
 #[cfg(unix)]
 mod tests {
-    use ama::actuator::shell::*;
+    use ama_core::actuator::shell::*;
 
     #[tokio::test]
     async fn executes_simple_intent() {

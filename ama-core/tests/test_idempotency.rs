@@ -1,4 +1,4 @@
-use ama::idempotency::*;
+use ama_core::idempotency::*;
 use uuid::Uuid;
 use std::time::Duration;
 

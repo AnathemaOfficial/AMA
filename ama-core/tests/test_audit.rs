@@ -1,4 +1,4 @@
-use ama::audit::*;
+use ama_core::audit::*;
 
 #[test]
 fn request_hash_is_deterministic() {

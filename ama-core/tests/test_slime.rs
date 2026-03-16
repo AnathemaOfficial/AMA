@@ -1,4 +1,4 @@
-use ama::slime::*;
+use ama_core::slime::*;
 use std::sync::Arc;
 use std::thread;
 

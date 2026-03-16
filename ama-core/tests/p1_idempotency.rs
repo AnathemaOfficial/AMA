@@ -9,7 +9,7 @@
 ///   - Test 2, 7: FAIL (race condition in check-then-insert)
 ///   - Tests 5, 6: FAIL (P0 uses remove() instead of commit-to-DONE)
 
-use ama::idempotency::{IdempotencyCache, IdempotencyStatus};
+use ama_core::idempotency::{IdempotencyCache, IdempotencyStatus};
 use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
 use std::time::Duration;
 use uuid::Uuid;

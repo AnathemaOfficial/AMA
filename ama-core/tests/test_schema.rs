@@ -1,4 +1,4 @@
-use ama::schema::*;
+use ama_core::schema::*;
 
 #[test]
 fn parses_valid_file_write() {

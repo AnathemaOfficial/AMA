@@ -1,4 +1,4 @@
-use ama::newtypes::*;
+use ama_core::newtypes::*;
 use std::path::PathBuf;
 
 #[test]

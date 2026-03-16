@@ -1,48 +1,53 @@
-use ama::mapper::*;
-use ama::config::*;
+use ama_core::config::*;
 use tempfile::TempDir;
 use std::fs;
 
 #[test]
-fn maps_file_write_to_domain() {
-    let config = test_config();
-    let result = map_action("file_write", 10, &config);
+fn loads_valid_config() {
+    let dir = TempDir::new().unwrap();
+    let ws = dir.path().join("workspace");
+    fs::create_dir(&ws).unwrap();
+
+    write_test_configs(dir.path(), ws.to_str().unwrap());
+
+    let result = AmaConfig::load(dir.path());
     assert!(result.is_ok());
-    let mapping = result.unwrap();
-    assert_eq!(mapping.domain_id, "fs.write.workspace");
-    assert_eq!(mapping.magnitude, 10);
 }
 
 #[test]
-fn rejects_unknown_action() {
-    let config = test_config();
-    let result = map_action("unknown_action", 1, &config);
+fn rejects_missing_config_file() {
+    let dir = TempDir::new().unwrap();
+    let result = AmaConfig::load(dir.path());
     assert!(result.is_err());
 }
 
 #[test]
-fn maps_shell_exec_to_domain() {
-    let config = test_config();
-    let result = map_action("shell_exec", 5, &config);
-    assert!(result.is_ok());
-    assert_eq!(result.unwrap().domain_id, "proc.exec.bounded");
+fn rejects_relative_workspace_root() {
+    let dir = TempDir::new().unwrap();
+    write_test_configs(dir.path(), "./relative");
+    let result = AmaConfig::load(dir.path());
+    assert!(result.is_err());
 }
 
-fn test_config() -> AmaConfig {
+#[test]
+fn computes_sha256_hashes() {
     let dir = TempDir::new().unwrap();
     let ws = dir.path().join("workspace");
     fs::create_dir(&ws).unwrap();
-    write_test_configs(dir.path(), &ws.to_str().unwrap().replace('\\', "\\\\"));
-    // Keep dir alive by leaking it (test only)
+    write_test_configs(dir.path(), ws.to_str().unwrap());
+
     let config = AmaConfig::load(dir.path()).unwrap();
-    std::mem::forget(dir);
-    config
+    assert!(!config.boot_hashes.config_hash.is_empty());
+    assert!(!config.boot_hashes.domains_hash.is_empty());
 }
 
+/// Helper: write minimal valid config files into a directory.
 fn write_test_configs(dir: &std::path::Path, workspace_root: &str) {
+    // On Windows, backslashes in TOML strings must be escaped.
+    let workspace_root_escaped = workspace_root.replace('\\', "\\\\");
     fs::write(dir.join("config.toml"), format!(r#"
 [ama]
-workspace_root = "{workspace_root}"
+workspace_root = "{workspace_root_escaped}"
 bind_host = "127.0.0.1"
 bind_port = 8787
 

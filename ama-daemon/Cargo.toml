@@ -1,0 +1,47 @@
+[package]
+name = "ama-daemon"
+version = "0.2.0-p2-dev"
+edition = "2021"
+description = "AMA HTTP daemon — axum wrapper for ama-core"
+
+[features]
+test-utils = ["dep:axum-test", "ama-core/test-utils"]
+
+[dependencies]
+ama-core = { path = "../ama-core" }
+axum = "0.8"
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tower = { version = "0.5", features = ["limit"] }
+tower-http = { version = "0.6", features = ["limit"] }
+bytes = "1"
+axum-test = { version = "17", optional = true }
+
+[dev-dependencies]
+axum-test = "17"
+tokio = { version = "1", features = ["full", "test-util"] }
+tempfile = "3"
+
+[[test]]
+name = "test_integration"
+required-features = ["test-utils"]
+
+[[test]]
+name = "p1_timeouts"
+required-features = ["test-utils"]
+
+[[test]]
+name = "p1_rate_limit"
+required-features = ["test-utils"]
+
+[[test]]
+name = "p1_queue"
+required-features = ["test-utils"]
+
+[[test]]
+name = "p1_adversarial"
+required-features = ["test-utils"]

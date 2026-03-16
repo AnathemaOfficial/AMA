@@ -11,53 +11,73 @@ permits actuation only after binary authorization.
 ```
 Agent (OpenClaw, LangChain, etc.)
   │
+  │  X-Agent-Id: openclaw
   ▼
-┌─────────────────────────────────────────────┐
-│  AMA  (127.0.0.1:8787)                     │
-│                                             │
-│  POST /ama/action                           │
-│    │                                        │
-│    ├─ 1. Ingress         Rate limit, body   │
-│    │                     limit, idempotency  │
-│    ├─ 2. Schema          JSON validation     │
-│    ├─ 3. Canonicalize    → CanonicalAction   │
-│    ├─ 4. Map             → (domain_id, mag)  │
-│    ├─ 5. Authorize       → SLIME/AB-S        │
-│    │       Authorized ──► 6. Actuate         │
-│    │       Impossible ──► 403                │
-│    └─ 6. Actuate         Execute + audit     │
-│                                             │
-│  GET /ama/health    Liveness                │
-│  GET /ama/version   Version info            │
-│  GET /ama/status    Capacity + domain stats │
-└─────────────────────────────────────────────┘
+┌──────────────────── ama-daemon ─────────────────────┐
+│  HTTP transport layer (axum 0.8)                    │
+│  - X-Agent-Id resolution (context selector)         │
+│  - Per-agent rate limiting                          │
+│  - Body size limits, timeouts, admission control    │
+│  - Idempotency key validation                       │
+│                                                     │
+│  ┌──────────────── ama-core ──────────────────┐     │
+│  │  Decision law engine (zero HTTP dependency) │     │
+│  │                                             │     │
+│  │  POST /ama/action                           │     │
+│  │    ├─ 1. Validate      magnitude, fields    │     │
+│  │    ├─ 2. Canonicalize  → CanonicalAction    │     │
+│  │    ├─ 3. Map           → (domain_id, mag)   │     │
+│  │    ├─ 4. Authorize     → SLIME/AB-S         │     │
+│  │    │     Authorized ──► 5. Actuate          │     │
+│  │    │     Impossible ──► 403                 │     │
+│  │    └─ 5. Actuate       Execute + audit      │     │
+│  └─────────────────────────────────────────────┘     │
+│                                                     │
+│  GET /ama/health    Liveness                        │
+│  GET /ama/version   Version info                    │
+│  GET /ama/status    Per-agent capacity + domains    │
+└─────────────────────────────────────────────────────┘
   │
   ▼
 Real World (filesystem, processes, HTTPS)
 ```
 
-## Source Layout
+## Workspace Layout
+
+AMA is a Cargo workspace with two crates that enforce a strict separation:
+
+- **ama-core** contains the decision law — all validation, canonicalization, mapping,
+  authorization, and actuation logic. It has **zero HTTP dependencies**. If you can
+  express it as a pure function of `(request, config, authorizer) → result`, it belongs
+  in ama-core.
+
+- **ama-daemon** handles HTTP transport only — axum routing, middleware (rate limiting,
+  timeouts, body limits, admission control), `X-Agent-Id` header resolution, and
+  serialization of `AmaError` into HTTP responses. It depends on ama-core as a library.
 
 ```
-src/
-├── main.rs          Entry point, boot integrity, server start
+ama-core/src/
 ├── lib.rs           Crate root, module declarations
-├── config.rs        TOML loading, SHA-256 boot hashing
-├── server.rs        axum router, middleware (rate limit, timeout, admission)
+├── config.rs        TOML loading, AgentConfig, SHA-256 boot hashing
+├── errors.rs        Error types + http_status_and_body() (no axum)
 ├── schema.rs        JSON deserialization, field validation
 ├── canonical.rs     CanonicalAction enum
 ├── newtypes.rs      WorkspacePath, IntentId, AllowlistedUrl, SafeArg, BoundedBytes
 ├── mapper.rs        action → domain_id mapping via domains.toml
 ├── pipeline.rs      Orchestrates validate → map → authorize → actuate
-├── slime.rs         Embedded AB-S authorizer (AtomicU64 CAS)
+├── slime.rs         SLIME authorizer (P0Authorizer, AgentRegistry)
 ├── idempotency.rs   UUID-keyed deduplication cache (DashMap)
 ├── audit.rs         Structured tracing, SHA-256 request hashing
-├── errors.rs        Error types → HTTP status mapping
 └── actuator/
     ├── mod.rs       Actuator dispatcher
     ├── file.rs      Atomic file write/read (tmp + rename)
     ├── shell.rs     execv direct, setpgid, kill sequence
     └── http.rs      HTTPS-only, allowlist, SSRF protection
+
+ama-daemon/src/
+├── main.rs          Entry point, boot integrity, server start
+├── lib.rs           Crate root
+└── server.rs        axum router, AppState, middleware, X-Agent-Id routing
 ```
 
 ## Configuration
@@ -66,13 +86,57 @@ All config is static TOML, loaded once at boot, never reloaded at runtime.
 
 ```
 config/
-├── config.toml      Global settings + SLIME capacity + domain policies
+├── config.toml      Global settings (bind address, slime mode)
 ├── domains.toml     action → domain_id mapping + validators
 ├── intents.toml     Shell intent → binary + args mapping
-└── allowlist.toml   HTTPS URL patterns + allowed methods
+├── allowlist.toml   HTTPS URL patterns + allowed methods
+└── agents/          Per-agent capacity configurations
+    ├── default.toml     Default agent (backward compat)
+    ├── readonly.toml    Read-only agent example
+    ├── developer.toml   High-capacity developer agent example
+    └── ci-bot.toml      CI pipeline agent example
 ```
 
-Boot integrity: SHA-256 of all four files computed and logged at startup.
+Boot integrity: SHA-256 of all config files (including agent configs) computed and
+logged at startup. Any modification requires a restart.
+
+### Agent Configuration
+
+Each agent gets its own TOML file in `config/agents/`. An agent config defines:
+- `agent_id` — unique identifier (used with `X-Agent-Id` header)
+- `max_capacity` — monotonic thermodynamic budget (never resets)
+- `rate_limit_per_window` / `rate_limit_window_secs` — operational rate limit
+- `domains` — which domains are enabled and per-action magnitude limits
+
+See `config/agents/` for concrete examples with different capacity profiles.
+
+## X-Agent-Id Header
+
+`X-Agent-Id` is a **context selector** in P2. It routes the request to the correct
+agent's capacity budget and rate limiter.
+
+**Important:** `X-Agent-Id` is NOT authentication. It does not verify identity or
+bind a caller to a runtime. Any client that knows a valid agent_id can select it.
+In P2, this is acceptable because AMA runs on `127.0.0.1` (localhost only).
+
+Behavior:
+- **Header present + valid** → route to that agent's authorizer
+- **Header present + unknown** → `400 Bad Request` (not 401/403)
+- **Header absent + single agent** → use default agent (backward compat)
+- **Header absent + multiple agents** → `400 Bad Request`
+
+A future phase (P3) may introduce identity binding where `X-Agent-Id` is verified
+against a capability token or Machine-Suit admission credential.
+
+## Capacity Model
+
+AMA enforces two independent layers of capacity control. See
+[`docs/CAPACITY_MODEL.md`](CAPACITY_MODEL.md) for full details.
+
+| Layer | Mechanism | Scope | Resets? |
+|-------|-----------|-------|---------|
+| **Layer 1: Monotonic Capacity** | AtomicU64 CAS loop | Per-agent | Never (process restart) |
+| **Layer 2: Operational Rate Limits** | Mutex<RateLimitState> | Per-agent | Per time window |
 
 ## Key Design Decisions
 
@@ -86,7 +150,8 @@ constructing invalid instances.
 
 Capacity is entropy: it only increases, never decreases within a session. Implemented
 via `AtomicU64` compare-and-swap loop. Hardware guarantee: `capacity` never exceeds
-`max_capacity`. Reset requires process restart (Thermodynamic Cooling).
+`max_capacity`. Reset requires process restart (Thermodynamic Cooling). Each agent
+has its own independent capacity counter.
 
 ### Closed World Assumption
 
@@ -104,27 +169,32 @@ Every `POST /ama/action` requires a UUID v4 `Idempotency-Key` header. Duplicate
 within 5-minute window returns cached response. In-flight duplicate → `409 Conflict`.
 Cache uses `DashMap::entry()` for atomic check-or-insert (P1 fix).
 
-## Concurrency Model (P1)
+The idempotency cache is **global** (not per-agent). A UUID used by one agent cannot
+be reused by another.
 
-| Layer | Mechanism | Purpose |
-|-------|-----------|---------|
-| Admission | `concurrency_limit(8)` (Tower) | Bounded concurrent requests |
-| Rate limit | `Mutex<RateLimitState>` (60 req/min) | Burst protection |
-| Capacity | `AtomicU64` CAS loop | Race-safe thermodynamic budget |
-| Idempotency | `DashMap::entry()` | Atomic deduplication |
-| Timeout | `TimeoutLayer(30s)` + per-action limits | Bounded execution lifecycle |
+## Concurrency Model (P1/P2)
+
+| Layer | Mechanism | Scope | Purpose |
+|-------|-----------|-------|---------|
+| Admission | `concurrency_limit(8)` (Tower) | Global | Bounded concurrent requests |
+| Rate limit | `Mutex<RateLimitState>` | Per-agent | Operational burst protection |
+| Capacity | `AtomicU64` CAS loop | Per-agent | Thermodynamic budget |
+| Idempotency | `DashMap::entry()` | Global | Atomic deduplication |
+| Timeout | `TimeoutLayer(30s)` + per-action limits | Global | Bounded execution lifecycle |
 
 ## Phases
 
 | Phase | Status | Scope |
 |-------|--------|-------|
 | P0 | HELD (v0.1.0-p0-held) | Single-agent local baseline |
-| P1 | HELD (v0.1.0-p1-held) | Multi-agent concurrency hardening |
-| P2 | Planned | Cross-platform path safety, OpenClaw adapter, multi-adapter testing |
+| P1 | HELD (v0.1.0-p1-held) | Concurrent multi-agent hardening |
+| P2 | HELD (v0.2.0-p2-held) | Multi-agent capacity system, workspace split |
+| P3 | Planned | Identity binding, capability manifests, per-agent workspaces |
 
 ## References
 
 - [P0 Design Specification](superpowers/specs/2026-03-13-ama-p0-design.md)
+- [Capacity Model](CAPACITY_MODEL.md)
 - [P1 HELD Summary](p1/AMA_P1_HELD.md)
 - [Known Issues](KNOWN_ISSUES_P1.md)
 - [Concurrency Model](p1/AMA_CONCURRENCY_MODEL.md)

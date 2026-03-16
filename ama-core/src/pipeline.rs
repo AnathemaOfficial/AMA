@@ -5,7 +5,7 @@ use crate::errors::AmaError;
 use crate::mapper::map_action;
 use crate::newtypes::*;
 use crate::schema::{ActionRequest, ActionResponse, validate_magnitude};
-use crate::slime::{P0Authorizer, SlimeAuthorizer, SlimeVerdict};
+use crate::slime::{SlimeAuthorizer, SlimeVerdict};
 use std::time::{Duration, Instant};
 
 /// Per-action timeout durations from spec.
@@ -256,7 +256,7 @@ async fn actuate(
 pub async fn process_action(
     request: ActionRequest,
     config: &AmaConfig,
-    authorizer: &P0Authorizer,
+    authorizer: &dyn SlimeAuthorizer,
     action_id: String,
     session_id: &str,
 ) -> Result<ActionResponse, AmaError> {

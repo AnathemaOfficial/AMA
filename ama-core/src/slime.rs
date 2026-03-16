@@ -1,4 +1,4 @@
-use crate::config::DomainPolicy;
+use crate::config::{AgentConfig, DomainPolicy};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use uuid::Uuid;
@@ -94,5 +94,38 @@ impl SlimeAuthorizer for P0Authorizer {
 
     fn session_id(&self) -> &Uuid {
         &self.session_id
+    }
+}
+
+/// Registry of per-agent P0Authorizer instances with independent capacity counters.
+pub struct AgentRegistry {
+    agents: HashMap<String, P0Authorizer>,
+}
+
+impl AgentRegistry {
+    pub fn new(configs: Vec<AgentConfig>) -> Self {
+        let mut agents = HashMap::new();
+        for config in configs {
+            let domains: Vec<(DomainId, DomainPolicy)> = config.domain_policies.into_iter().collect();
+            let authorizer = P0Authorizer::new(config.max_capacity, domains);
+            agents.insert(config.agent_id, authorizer);
+        }
+        Self { agents }
+    }
+
+    pub fn get(&self, agent_id: &str) -> Option<&P0Authorizer> {
+        self.agents.get(agent_id)
+    }
+
+    pub fn agent_ids(&self) -> Vec<&str> {
+        self.agents.keys().map(|s| s.as_str()).collect()
+    }
+
+    pub fn len(&self) -> usize {
+        self.agents.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.agents.is_empty()
     }
 }

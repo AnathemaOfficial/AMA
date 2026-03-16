@@ -85,6 +85,58 @@ fn test_authorizer(max_cap: u64) -> P0Authorizer {
     ])
 }
 
+#[test]
+fn test_agent_registry_independent_capacity() {
+    use ama_core::slime::{AgentRegistry, SlimeAuthorizer, SlimeVerdict};
+    use ama_core::config::{AgentConfig, DomainPolicy};
+    use std::collections::HashMap;
+
+    let mut domain_policies = HashMap::new();
+    domain_policies.insert("fs.write.workspace".into(), DomainPolicy {
+        enabled: true,
+        max_magnitude_per_action: 100,
+    });
+
+    let agents = vec![
+        AgentConfig {
+            agent_id: "agent_a".into(),
+            max_capacity: 500,
+            rate_limit_per_window: 60,
+            rate_limit_window_secs: 60,
+            domain_policies: domain_policies.clone(),
+        },
+        AgentConfig {
+            agent_id: "agent_b".into(),
+            max_capacity: 300,
+            rate_limit_per_window: 60,
+            rate_limit_window_secs: 60,
+            domain_policies: domain_policies.clone(),
+        },
+    ];
+
+    let registry = AgentRegistry::new(agents);
+
+    // Agent A can reserve independently
+    let auth_a = registry.get("agent_a").unwrap();
+    assert_eq!(auth_a.try_reserve(&"fs.write.workspace".into(), 100), SlimeVerdict::Authorized);
+    assert_eq!(auth_a.capacity_used(), 100);
+
+    // Agent B is unaffected
+    let auth_b = registry.get("agent_b").unwrap();
+    assert_eq!(auth_b.capacity_used(), 0);
+    assert_eq!(auth_b.try_reserve(&"fs.write.workspace".into(), 100), SlimeVerdict::Authorized);
+
+    // Agent A can exhaust its own budget
+    for _ in 0..4 {
+        auth_a.try_reserve(&"fs.write.workspace".into(), 100);
+    }
+    assert_eq!(auth_a.capacity_used(), 500);
+    assert_eq!(auth_a.try_reserve(&"fs.write.workspace".into(), 1), SlimeVerdict::Impossible);
+
+    // Agent B still has budget
+    assert_eq!(auth_b.try_reserve(&"fs.write.workspace".into(), 100), SlimeVerdict::Authorized);
+}
+
 fn test_authorizer_with_disabled(max_cap: u64) -> P0Authorizer {
     P0Authorizer::new(max_cap, vec![
         ("fs.write.workspace".into(), DomainPolicy { enabled: false, max_magnitude_per_action: 100 }),

@@ -9,6 +9,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let config = AmaConfig::load(Path::new("config"))?;
     tracing::info!(hashes = ?config.boot_hashes, "Boot integrity verified");
+    tracing::info!(
+        agent_count = config.agents.len(),
+        default_agent = ?config.default_agent_id,
+        "Agent configurations loaded"
+    );
 
     let cleaned = cleanup_orphan_temps(&config.workspace_root);
     if cleaned > 0 {

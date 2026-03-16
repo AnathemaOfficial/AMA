@@ -384,6 +384,16 @@ pub async fn test_server_with_capacity(max_capacity: u64) -> axum_test::TestServ
         requires_intent: false,
     });
 
+    let default_agent = ama_core::config::AgentConfig {
+        agent_id: "default".into(),
+        max_capacity,
+        rate_limit_per_window: 60,
+        rate_limit_window_secs: 60,
+        domain_policies: domain_policies.clone(),
+    };
+    let mut agents = HashMap::new();
+    agents.insert("default".into(), default_agent);
+
     let config = AmaConfig {
         workspace_root: workspace,
         bind_host: "127.0.0.1".into(),
@@ -396,11 +406,14 @@ pub async fn test_server_with_capacity(max_capacity: u64) -> axum_test::TestServ
         domain_mappings,
         intents: HashMap::new(),
         allowlist: vec![],
+        agents,
+        default_agent_id: Some("default".into()),
         boot_hashes: BootHashes {
             config_hash: "test".into(),
             domains_hash: "test".into(),
             intents_hash: "test".into(),
             allowlist_hash: "test".into(),
+            agents_hash: "test".into(),
         },
     };
 

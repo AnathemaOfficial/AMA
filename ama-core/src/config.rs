@@ -14,6 +14,7 @@ pub struct BootHashes {
     pub domains_hash: String,
     pub intents_hash: String,
     pub allowlist_hash: String,
+    pub agents_hash: String,
 }
 
 fn sha256_hex(data: &[u8]) -> String {
@@ -51,9 +52,33 @@ fn default_log_output() -> String { "stderr".into() }
 #[derive(Deserialize)]
 struct RawSlime {
     mode: String,
-    max_capacity: u64,
+    #[serde(default)]
+    max_capacity: Option<u64>,
+    #[serde(default)]
     domains: HashMap<String, RawDomainPolicy>,
 }
+
+// ── Agent config raw structs ────────────────────────────────
+
+#[derive(Deserialize)]
+struct RawAgentConfig {
+    agent: RawAgent,
+}
+
+#[derive(Deserialize)]
+struct RawAgent {
+    agent_id: String,
+    max_capacity: u64,
+    #[serde(default = "default_rate_limit_per_window")]
+    rate_limit_per_window: u64,
+    #[serde(default = "default_rate_limit_window_secs")]
+    rate_limit_window_secs: u64,
+    #[serde(default)]
+    domains: HashMap<String, RawDomainPolicy>,
+}
+
+fn default_rate_limit_per_window() -> u64 { 60 }
+fn default_rate_limit_window_secs() -> u64 { 60 }
 
 #[derive(Deserialize, Clone)]
 struct RawDomainPolicy {
@@ -142,6 +167,135 @@ pub struct IntentMapping {
     pub working_dir: Option<String>,
 }
 
+/// Per-agent configuration with capacity, rate limits, and domain policies.
+#[derive(Debug, Clone)]
+pub struct AgentConfig {
+    pub agent_id: String,
+    pub max_capacity: u64,
+    pub rate_limit_per_window: u64,
+    pub rate_limit_window_secs: u64,
+    pub domain_policies: HashMap<String, DomainPolicy>,
+}
+
+impl AgentConfig {
+    /// Parse an AgentConfig from a TOML string.
+    pub fn from_toml_str(toml_str: &str) -> Result<Self, AmaError> {
+        let raw: RawAgentConfig = toml::from_str(toml_str)
+            .map_err(|e| AmaError::ServiceUnavailable {
+                message: format!("agent config parse error: {e}"),
+            })?;
+
+        let agent = raw.agent;
+
+        // Validate agent_id: non-empty, alphanumeric/underscore/hyphen only
+        if agent.agent_id.is_empty() {
+            return Err(AmaError::ServiceUnavailable {
+                message: "agent_id must not be empty".into(),
+            });
+        }
+        if !agent.agent_id.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-') {
+            return Err(AmaError::ServiceUnavailable {
+                message: format!("agent_id '{}' contains invalid characters (only alphanumeric, _, -)", agent.agent_id),
+            });
+        }
+
+        // Validate capacity
+        if agent.max_capacity == 0 {
+            return Err(AmaError::ServiceUnavailable {
+                message: "agent max_capacity must be > 0".into(),
+            });
+        }
+
+        // Validate rate limits
+        if agent.rate_limit_per_window == 0 {
+            return Err(AmaError::ServiceUnavailable {
+                message: "agent rate_limit_per_window must be > 0".into(),
+            });
+        }
+        if agent.rate_limit_window_secs == 0 {
+            return Err(AmaError::ServiceUnavailable {
+                message: "agent rate_limit_window_secs must be > 0".into(),
+            });
+        }
+
+        // Normalize domain keys (underscore -> dot) and validate
+        let mut domain_policies = HashMap::new();
+        for (key, raw_policy) in &agent.domains {
+            let domain_id = key.replace('_', ".");
+            if raw_policy.max_magnitude_per_action == 0 {
+                return Err(AmaError::ServiceUnavailable {
+                    message: format!(
+                        "agent '{}' domain '{}': max_magnitude_per_action must be > 0",
+                        agent.agent_id, domain_id
+                    ),
+                });
+            }
+            if raw_policy.max_magnitude_per_action > agent.max_capacity {
+                return Err(AmaError::ServiceUnavailable {
+                    message: format!(
+                        "agent '{}' domain '{}': max_magnitude_per_action ({}) > max_capacity ({})",
+                        agent.agent_id, domain_id,
+                        raw_policy.max_magnitude_per_action, agent.max_capacity
+                    ),
+                });
+            }
+            domain_policies.insert(domain_id, DomainPolicy {
+                enabled: raw_policy.enabled,
+                max_magnitude_per_action: raw_policy.max_magnitude_per_action,
+            });
+        }
+
+        Ok(Self {
+            agent_id: agent.agent_id,
+            max_capacity: agent.max_capacity,
+            rate_limit_per_window: agent.rate_limit_per_window,
+            rate_limit_window_secs: agent.rate_limit_window_secs,
+            domain_policies,
+        })
+    }
+}
+
+/// Load all agent configs from a directory of .toml files.
+/// Returns a map of agent_id -> AgentConfig. Rejects duplicates and empty dirs.
+pub fn load_agent_configs(agents_dir: &Path) -> Result<HashMap<String, AgentConfig>, AmaError> {
+    let mut agents = HashMap::new();
+
+    let entries: Vec<_> = fs::read_dir(agents_dir)
+        .map_err(|e| AmaError::ServiceUnavailable {
+            message: format!("cannot read agents directory: {e}"),
+        })?
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| {
+            entry.path().extension().and_then(|e| e.to_str()) == Some("toml")
+        })
+        .collect();
+
+    if entries.is_empty() {
+        return Err(AmaError::ServiceUnavailable {
+            message: "agents directory contains no .toml files".into(),
+        });
+    }
+
+    for entry in entries {
+        let path = entry.path();
+        let contents = fs::read_to_string(&path).map_err(|e| AmaError::ServiceUnavailable {
+            message: format!("cannot read {}: {e}", path.display()),
+        })?;
+
+        let agent_config = AgentConfig::from_toml_str(&contents)?;
+
+        if agents.contains_key(&agent_config.agent_id) {
+            return Err(AmaError::ServiceUnavailable {
+                message: format!("duplicate agent_id '{}' in agents directory", agent_config.agent_id),
+            });
+        }
+
+        agents.insert(agent_config.agent_id.clone(), agent_config);
+    }
+
+    Ok(agents)
+}
+
 #[derive(Debug, Clone)]
 pub struct AmaConfig {
     pub workspace_root: PathBuf,
@@ -155,6 +309,8 @@ pub struct AmaConfig {
     pub domain_mappings: HashMap<String, DomainMapping>,
     pub intents: HashMap<String, IntentMapping>,
     pub allowlist: Vec<AllowlistEntry>,
+    pub agents: HashMap<String, AgentConfig>,
+    pub default_agent_id: Option<String>,
     pub boot_hashes: BootHashes,
 }
 
@@ -167,13 +323,11 @@ impl AmaConfig {
         let intents_bytes = Self::read_file(config_dir, "intents.toml")?;
         let allowlist_bytes = Self::read_file(config_dir, "allowlist.toml")?;
 
-        // ── Compute SHA-256 hashes ───────────────────────────
-        let boot_hashes = BootHashes {
-            config_hash: sha256_hex(&config_bytes),
-            domains_hash: sha256_hex(&domains_bytes),
-            intents_hash: sha256_hex(&intents_bytes),
-            allowlist_hash: sha256_hex(&allowlist_bytes),
-        };
+        // ── Compute SHA-256 hashes (agents_hash added later) ──
+        let config_hash = sha256_hex(&config_bytes);
+        let domains_hash = sha256_hex(&domains_bytes);
+        let intents_hash = sha256_hex(&intents_bytes);
+        let allowlist_hash = sha256_hex(&allowlist_bytes);
 
         // ── Parse TOML ───────────────────────────────────────
         let raw_config: RawConfig = toml::from_str(
@@ -224,30 +378,109 @@ impl AmaConfig {
                 raw_config.slime.mode
             )));
         }
-        if raw_config.slime.max_capacity == 0 {
-            return Err(Self::boot_err("slime.max_capacity must be > 0".into()));
-        }
 
-        // ── Build domain policies (underscore -> dot normalization) ──
-        let mut domain_policies = HashMap::new();
-        for (key, raw_policy) in &raw_config.slime.domains {
-            let domain_id = key.replace('_', ".");
-            if raw_policy.max_magnitude_per_action == 0 {
-                return Err(Self::boot_err(format!(
-                    "domain '{}': max_magnitude_per_action must be > 0", domain_id
-                )));
-            }
-            if raw_policy.max_magnitude_per_action > raw_config.slime.max_capacity {
-                return Err(Self::boot_err(format!(
-                    "domain '{}': max_magnitude_per_action ({}) > max_capacity ({})",
-                    domain_id, raw_policy.max_magnitude_per_action, raw_config.slime.max_capacity
-                )));
-            }
-            domain_policies.insert(domain_id, DomainPolicy {
-                enabled: raw_policy.enabled,
-                max_magnitude_per_action: raw_policy.max_magnitude_per_action,
-            });
-        }
+        // ── Load agents: either from agents/ dir or backward compat from [slime] ──
+        let agents_dir = config_dir.join("agents");
+        let (agents, default_agent_id, domain_policies, max_capacity, agents_hash) =
+            if agents_dir.is_dir() {
+                // P2 path: load agent configs from agents/ directory
+                let agent_configs = load_agent_configs(&agents_dir)?;
+
+                // Compute agents_hash: sort file hashes alphabetically
+                let mut agent_hashes: Vec<String> = Vec::new();
+                let mut entries: Vec<_> = fs::read_dir(&agents_dir)
+                    .map_err(|e| Self::boot_err(format!("cannot read agents dir: {e}")))?
+                    .filter_map(|e| e.ok())
+                    .filter(|e| e.path().extension().and_then(|x| x.to_str()) == Some("toml"))
+                    .collect();
+                entries.sort_by_key(|e| e.path());
+                for entry in &entries {
+                    let bytes = fs::read(entry.path())
+                        .map_err(|e| Self::boot_err(format!("cannot read {}: {e}", entry.path().display())))?;
+                    agent_hashes.push(sha256_hex(&bytes));
+                }
+                let combined = agent_hashes.join("");
+                let agents_hash = sha256_hex(combined.as_bytes());
+
+                // Union of all agent domain_policies for backward compat fields
+                let mut all_domain_policies = HashMap::new();
+                let mut global_max_capacity: u64 = 0;
+                for agent in agent_configs.values() {
+                    if agent.max_capacity > global_max_capacity {
+                        global_max_capacity = agent.max_capacity;
+                    }
+                    for (did, policy) in &agent.domain_policies {
+                        all_domain_policies.entry(did.clone()).or_insert_with(|| policy.clone());
+                    }
+                }
+
+                // Cross-validate: every domain_id in agent configs must exist in domains.toml
+                for agent in agent_configs.values() {
+                    for domain_id in agent.domain_policies.keys() {
+                        let found = raw_domains.domains.values().any(|d| d.domain_id == *domain_id);
+                        if !found {
+                            return Err(Self::boot_err(format!(
+                                "agent '{}' references domain '{}' not defined in domains.toml",
+                                agent.agent_id, domain_id
+                            )));
+                        }
+                    }
+                }
+
+                let default_id = if agent_configs.len() == 1 {
+                    Some(agent_configs.keys().next().unwrap().clone())
+                } else {
+                    None
+                };
+
+                (agent_configs, default_id, all_domain_policies, global_max_capacity, agents_hash)
+            } else {
+                // Backward compat: synthesize "default" agent from [slime] section
+                let slime_capacity = raw_config.slime.max_capacity.ok_or_else(|| {
+                    Self::boot_err("slime.max_capacity is required when no agents/ directory exists".into())
+                })?;
+                if slime_capacity == 0 {
+                    return Err(Self::boot_err("slime.max_capacity must be > 0".into()));
+                }
+                if raw_config.slime.domains.is_empty() {
+                    return Err(Self::boot_err(
+                        "slime.domains is required when no agents/ directory exists".into(),
+                    ));
+                }
+
+                let mut domain_policies = HashMap::new();
+                for (key, raw_policy) in &raw_config.slime.domains {
+                    let domain_id = key.replace('_', ".");
+                    if raw_policy.max_magnitude_per_action == 0 {
+                        return Err(Self::boot_err(format!(
+                            "domain '{}': max_magnitude_per_action must be > 0", domain_id
+                        )));
+                    }
+                    if raw_policy.max_magnitude_per_action > slime_capacity {
+                        return Err(Self::boot_err(format!(
+                            "domain '{}': max_magnitude_per_action ({}) > max_capacity ({})",
+                            domain_id, raw_policy.max_magnitude_per_action, slime_capacity
+                        )));
+                    }
+                    domain_policies.insert(domain_id, DomainPolicy {
+                        enabled: raw_policy.enabled,
+                        max_magnitude_per_action: raw_policy.max_magnitude_per_action,
+                    });
+                }
+
+                let default_agent = AgentConfig {
+                    agent_id: "default".into(),
+                    max_capacity: slime_capacity,
+                    rate_limit_per_window: 60,
+                    rate_limit_window_secs: 60,
+                    domain_policies: domain_policies.clone(),
+                };
+
+                let mut agents = HashMap::new();
+                agents.insert("default".into(), default_agent);
+
+                (agents, Some("default".into()), domain_policies, slime_capacity, String::new())
+            };
 
         // ── Build domain mappings ────────────────────────────
         let mut domain_mappings = HashMap::new();
@@ -300,6 +533,14 @@ impl AmaConfig {
             }
         }).collect();
 
+        let boot_hashes = BootHashes {
+            config_hash,
+            domains_hash,
+            intents_hash,
+            allowlist_hash,
+            agents_hash,
+        };
+
         Ok(Self {
             workspace_root,
             bind_host: raw_config.ama.bind_host,
@@ -307,11 +548,13 @@ impl AmaConfig {
             log_level: raw_config.ama.log_level,
             log_output: raw_config.ama.log_output,
             slime_mode: raw_config.slime.mode,
-            max_capacity: raw_config.slime.max_capacity,
+            max_capacity,
             domain_policies,
             domain_mappings,
             intents,
             allowlist,
+            agents,
+            default_agent_id,
             boot_hashes,
         })
     }

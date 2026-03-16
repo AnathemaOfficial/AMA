@@ -3,7 +3,7 @@ use ama_core::errors::AmaError;
 use ama_core::idempotency::{validate_idempotency_key, IdempotencyCache, IdempotencyStatus};
 use ama_core::pipeline::process_action;
 use ama_core::schema::ActionRequest;
-use ama_core::slime::{P0Authorizer, SlimeAuthorizer};
+use ama_core::slime::{AgentRegistry, SlimeAuthorizer};
 
 use axum::body::Body;
 use axum::extract::State;
@@ -32,47 +32,63 @@ fn ama_error_response(e: AmaError) -> Response {
 
 /// Rate limiter window state — protected by a single mutex to prevent
 /// the C3 race condition where counter increment and window reset
-/// were not atomic.
+/// were not atomic. Now carries its own per-agent limits.
 pub struct RateLimitState {
     pub window_start: Instant,
     pub count: u64,
+    pub max_per_window: u64,
+    pub window_secs: u64,
 }
 
 /// Shared application state wrapped in Arc for thread-safe access.
 pub struct AppState {
     pub config: AmaConfig,
-    pub authorizer: P0Authorizer,
+    pub agent_registry: AgentRegistry,
     pub idempotency_cache: IdempotencyCache,
     pub session_id: Uuid,
     pub start_time: Instant,
     pub domain_counters: HashMap<String, AtomicU64>,
-    pub rate_limiter: std::sync::Mutex<RateLimitState>,
+    pub agent_rate_limiters: HashMap<String, std::sync::Mutex<RateLimitState>>,
 }
 
 impl AppState {
     pub fn new(config: AmaConfig) -> Arc<Self> {
-        let max_capacity = config.max_capacity;
+        // Build AgentRegistry from config.agents
+        let agent_configs: Vec<ama_core::config::AgentConfig> =
+            config.agents.values().cloned().collect();
+        let agent_registry = AgentRegistry::new(agent_configs);
 
-        let slime_domains: Vec<(ama_core::slime::DomainId, ama_core::config::DomainPolicy)> =
-            config.domain_policies.iter().map(|(id, policy)| {
-                (id.clone(), policy.clone())
-            }).collect();
+        // Build per-agent rate limiters
+        let mut agent_rate_limiters = HashMap::new();
+        for (agent_id, agent_config) in &config.agents {
+            agent_rate_limiters.insert(
+                agent_id.clone(),
+                std::sync::Mutex::new(RateLimitState {
+                    window_start: Instant::now(),
+                    count: 0,
+                    max_per_window: agent_config.rate_limit_per_window,
+                    window_secs: agent_config.rate_limit_window_secs,
+                }),
+            );
+        }
 
+        // Build domain_counters as union of all agents' domain policy keys
         let mut domain_counters = HashMap::new();
-        for domain_id in config.domain_policies.keys() {
-            domain_counters.insert(domain_id.clone(), AtomicU64::new(0));
+        for agent in config.agents.values() {
+            for domain_id in agent.domain_policies.keys() {
+                domain_counters
+                    .entry(domain_id.clone())
+                    .or_insert_with(|| AtomicU64::new(0));
+            }
         }
 
         Arc::new(Self {
-            authorizer: P0Authorizer::new(max_capacity, slime_domains),
+            agent_registry,
             idempotency_cache: IdempotencyCache::new(10_000, std::time::Duration::from_secs(300)),
             session_id: Uuid::new_v4(),
             start_time: Instant::now(),
             domain_counters,
-            rate_limiter: std::sync::Mutex::new(RateLimitState {
-                window_start: Instant::now(),
-                count: 0,
-            }),
+            agent_rate_limiters,
             config,
         })
     }
@@ -121,14 +137,48 @@ async fn content_type_middleware(
     next.run(req).await
 }
 
+/// Resolve agent_id from X-Agent-Id header or default_agent_id.
+#[allow(clippy::result_large_err)]
+fn resolve_agent_id(
+    headers: &axum::http::HeaderMap,
+    state: &AppState,
+) -> Result<String, Response> {
+    match headers.get("x-agent-id") {
+        Some(val) => {
+            let agent_id = val.to_str().map_err(|_| {
+                ama_error_response(AmaError::BadRequest {
+                    message: "X-Agent-Id header is not valid ASCII".into(),
+                })
+            })?;
+            if state.agent_registry.get(agent_id).is_none() {
+                return Err(ama_error_response(AmaError::BadRequest {
+                    message: format!("unknown agent: {}", agent_id),
+                }));
+            }
+            Ok(agent_id.to_string())
+        }
+        None => match &state.config.default_agent_id {
+            Some(default) => Ok(default.clone()),
+            None => Err(ama_error_response(AmaError::BadRequest {
+                message: "X-Agent-Id header required (multiple agents configured)".into(),
+            })),
+        },
+    }
+}
+
 /// P1 fix (C3): window_start and counter are now under the same mutex.
 /// No gap between window reset and counter increment.
-fn check_rate_limit(state: &AppState) -> bool {
-    let mut rl = state.rate_limiter.lock().unwrap();
+/// P2: now per-agent with configurable limits.
+fn check_rate_limit(state: &AppState, agent_id: &str) -> bool {
+    let limiter = match state.agent_rate_limiters.get(agent_id) {
+        Some(l) => l,
+        None => return false,
+    };
+    let mut rl = limiter.lock().unwrap();
     let now = Instant::now();
     let elapsed = now.duration_since(rl.window_start);
 
-    if elapsed.as_secs() >= 60 {
+    if elapsed.as_secs() >= rl.window_secs {
         // New window — reset counter atomically with window start
         rl.window_start = now;
         rl.count = 1;
@@ -136,7 +186,7 @@ fn check_rate_limit(state: &AppState) -> bool {
     }
 
     rl.count += 1;
-    rl.count <= 60
+    rl.count <= rl.max_per_window
 }
 
 fn increment_domain_counter(state: &AppState, domain_id: &str) {
@@ -161,9 +211,20 @@ async fn handle_status(
     State(state): State<Arc<AppState>>,
 ) -> impl IntoResponse {
     let uptime = state.start_time.elapsed().as_secs();
-    let capacity_used = state.authorizer.capacity_used();
-    let capacity_max = state.authorizer.capacity_max();
 
+    // Per-agent capacity status
+    let mut agents_status = serde_json::Map::new();
+    for agent_id in state.agent_registry.agent_ids() {
+        if let Some(auth) = state.agent_registry.get(agent_id) {
+            agents_status.insert(agent_id.to_string(), json!({
+                "capacity_used": auth.capacity_used(),
+                "capacity_max": auth.capacity_max(),
+                "capacity_remaining": auth.capacity_max().saturating_sub(auth.capacity_used()),
+            }));
+        }
+    }
+
+    // Domain counters
     let mut domains = serde_json::Map::new();
     for (domain_id, policy) in &state.config.domain_policies {
         let count = state.domain_counters
@@ -178,10 +239,8 @@ async fn handle_status(
 
     Json(json!({
         "session_id": state.session_id.to_string(),
-        "capacity_used": capacity_used,
-        "capacity_max": capacity_max,
-        "capacity_remaining": capacity_max.saturating_sub(capacity_used),
         "uptime_seconds": uptime,
+        "agents": agents_status,
         "domains": domains,
     }))
 }
@@ -191,11 +250,17 @@ async fn handle_action(
     headers: axum::http::HeaderMap,
     body: axum::body::Bytes,
 ) -> Response {
-    // 1. Rate limit
-    if !check_rate_limit(&state) {
+    // 0. Resolve agent_id from header or default
+    let agent_id = match resolve_agent_id(&headers, &state) {
+        Ok(id) => id,
+        Err(resp) => return resp,
+    };
+
+    // 1. Per-agent rate limit
+    if !check_rate_limit(&state, &agent_id) {
         return (
             StatusCode::TOO_MANY_REQUESTS,
-            Json(json!({"status": "error", "error_class": "rate_limited", "message": "rate limit exceeded (60/min)"})),
+            Json(json!({"status": "error", "error_class": "rate_limited", "message": "rate limit exceeded"})),
         ).into_response();
     }
 
@@ -270,11 +335,22 @@ async fn handle_action(
     // Generate action_id
     let action_id = Uuid::new_v4().to_string();
 
-    // 6. Process through pipeline
+    // 6. Get agent's authorizer and process through pipeline
+    let authorizer = match state.agent_registry.get(&agent_id) {
+        Some(auth) => auth,
+        None => {
+            // Should not happen — resolve_agent_id already validated
+            state.idempotency_cache.remove(&idem_key);
+            return ama_error_response(AmaError::BadRequest {
+                message: format!("unknown agent: {}", agent_id),
+            });
+        }
+    };
+
     let result = process_action(
         request,
         &state.config,
-        &state.authorizer,
+        authorizer,
         action_id,
         &state.session_id.to_string(),
     ).await;
@@ -353,25 +429,25 @@ pub async fn shutdown_signal() {
     }
 }
 
-/// Test helper: build a test server with default capacity (10000).
+/// Test helper: build a test server with multiple agents.
 #[cfg(feature = "test-utils")]
-pub async fn test_server() -> axum_test::TestServer {
-    test_server_with_capacity(10_000).await
-}
-
-/// Test helper: build a test server with custom capacity.
-#[cfg(feature = "test-utils")]
-pub async fn test_server_with_capacity(max_capacity: u64) -> axum_test::TestServer {
-    use ama_core::config::{AmaConfig, DomainPolicy, DomainMapping, BootHashes};
+pub async fn test_server_multiagent(
+    agent_specs: Vec<(&str, u64, u64)>, // (agent_id, capacity, rate_limit_per_window)
+) -> axum_test::TestServer {
+    use ama_core::config::{AmaConfig, AgentConfig, DomainPolicy, DomainMapping, BootHashes};
 
     let workspace = std::env::temp_dir().join(format!("ama-test-{}", Uuid::new_v4()));
     std::fs::create_dir_all(&workspace).unwrap();
 
-    let mut domain_policies = HashMap::new();
-    domain_policies.insert("fs.write.workspace".into(), DomainPolicy {
-        enabled: true,
-        max_magnitude_per_action: 1000,
-    });
+    // Build shared domain policy (all agents get the same fs.write.workspace domain)
+    let base_domain_policies = {
+        let mut dp = HashMap::new();
+        dp.insert("fs.write.workspace".into(), DomainPolicy {
+            enabled: true,
+            max_magnitude_per_action: 1000,
+        });
+        dp
+    };
 
     let mut domain_mappings = HashMap::new();
     domain_mappings.insert("file_write".into(), DomainMapping {
@@ -381,15 +457,27 @@ pub async fn test_server_with_capacity(max_capacity: u64) -> axum_test::TestServ
         requires_intent: false,
     });
 
-    let default_agent = ama_core::config::AgentConfig {
-        agent_id: "default".into(),
-        max_capacity,
-        rate_limit_per_window: 60,
-        rate_limit_window_secs: 60,
-        domain_policies: domain_policies.clone(),
-    };
     let mut agents = HashMap::new();
-    agents.insert("default".into(), default_agent);
+    let mut global_max_capacity: u64 = 0;
+    for (agent_id, capacity, rate_limit) in &agent_specs {
+        let agent = AgentConfig {
+            agent_id: agent_id.to_string(),
+            max_capacity: *capacity,
+            rate_limit_per_window: *rate_limit,
+            rate_limit_window_secs: 60,
+            domain_policies: base_domain_policies.clone(),
+        };
+        if *capacity > global_max_capacity {
+            global_max_capacity = *capacity;
+        }
+        agents.insert(agent_id.to_string(), agent);
+    }
+
+    let default_agent_id = if agents.len() == 1 {
+        Some(agents.keys().next().unwrap().clone())
+    } else {
+        None
+    };
 
     let config = AmaConfig {
         workspace_root: workspace,
@@ -398,13 +486,13 @@ pub async fn test_server_with_capacity(max_capacity: u64) -> axum_test::TestServ
         log_level: "info".into(),
         log_output: "stderr".into(),
         slime_mode: "embedded".into(),
-        max_capacity,
-        domain_policies,
+        max_capacity: global_max_capacity,
+        domain_policies: base_domain_policies,
         domain_mappings,
         intents: HashMap::new(),
         allowlist: vec![],
         agents,
-        default_agent_id: Some("default".into()),
+        default_agent_id,
         boot_hashes: BootHashes {
             config_hash: "test".into(),
             domains_hash: "test".into(),
@@ -417,4 +505,16 @@ pub async fn test_server_with_capacity(max_capacity: u64) -> axum_test::TestServ
     let state = AppState::new(config);
     let app = build_router(state);
     axum_test::TestServer::new(app.into_make_service()).unwrap()
+}
+
+/// Test helper: build a test server with default capacity (10000).
+#[cfg(feature = "test-utils")]
+pub async fn test_server() -> axum_test::TestServer {
+    test_server_multiagent(vec![("default", 10_000, 60)]).await
+}
+
+/// Test helper: build a test server with custom capacity.
+#[cfg(feature = "test-utils")]
+pub async fn test_server_with_capacity(max_capacity: u64) -> axum_test::TestServer {
+    test_server_multiagent(vec![("default", max_capacity, 60)]).await
 }

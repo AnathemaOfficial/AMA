@@ -1,0 +1,24 @@
+# CI bot agent — moderate capacity with burst-tolerant window
+# Use case: automated pipelines, scheduled tasks, batch operations
+
+[agent]
+agent_id = "ci-bot"
+max_capacity = 20000
+rate_limit_per_window = 200
+rate_limit_window_secs = 300
+
+[agent.domains.fs_write_workspace]
+enabled = true
+max_magnitude_per_action = 100
+
+[agent.domains.fs_read_workspace]
+enabled = true
+max_magnitude_per_action = 500
+
+[agent.domains.proc_exec_bounded]
+enabled = true
+max_magnitude_per_action = 50
+
+[agent.domains.net_out_http]
+enabled = true
+max_magnitude_per_action = 200

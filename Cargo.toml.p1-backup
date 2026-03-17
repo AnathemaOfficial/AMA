@@ -1,0 +1,54 @@
+[package]
+name = "ama"
+version = "0.1.0-p1-held"
+edition = "2021"
+description = "Agent Machine Armor — Deterministic security membrane for AI agents"
+
+[features]
+test-utils = ["dep:axum-test"]
+
+[dependencies]
+axum = "0.8"
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+uuid = { version = "1", features = ["v4"] }
+sha2 = "0.10"
+reqwest = { version = "0.12", features = ["rustls-tls"], default-features = false }
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+dashmap = "6"
+tower = { version = "0.5", features = ["limit"] }
+tower-http = { version = "0.6", features = ["limit"] }
+bytes = "1"
+axum-test = { version = "17", optional = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+axum-test = "17"
+tempfile = "3"
+tokio = { version = "1", features = ["full", "test-util"] }
+
+[[test]]
+name = "test_integration"
+required-features = ["test-utils"]
+
+[[test]]
+name = "p1_timeouts"
+required-features = ["test-utils"]
+
+[[test]]
+name = "p1_rate_limit"
+required-features = ["test-utils"]
+
+[[test]]
+name = "p1_queue"
+required-features = ["test-utils"]
+
+[[test]]
+name = "p1_adversarial"
+required-features = ["test-utils"]

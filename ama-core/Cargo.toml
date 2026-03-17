@@ -1,0 +1,28 @@
+[package]
+name = "ama-core"
+version = "0.2.0-p2-held"
+edition = "2021"
+description = "AMA core library — deterministic security membrane for AI agents (no HTTP)"
+
+[features]
+test-utils = []
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+uuid = { version = "1", features = ["v4"] }
+sha2 = "0.10"
+reqwest = { version = "0.12", features = ["rustls-tls"], default-features = false }
+thiserror = "2"
+tracing = "0.1"
+dashmap = "6"
+tokio = { version = "1", features = ["full"] }
+bytes = "1"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["full", "test-util"] }

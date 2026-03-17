@@ -1,0 +1,25 @@
+# Read-only agent — can only read files, no writes/exec/HTTP
+# Use case: monitoring, log inspection, status checks
+
+[agent]
+agent_id = "readonly"
+max_capacity = 1000
+rate_limit_per_window = 10
+rate_limit_window_secs = 60
+
+[agent.domains.fs_read_workspace]
+enabled = true
+max_magnitude_per_action = 500
+
+# All other domains disabled — write/exec/http return Impossible
+[agent.domains.fs_write_workspace]
+enabled = false
+max_magnitude_per_action = 0
+
+[agent.domains.proc_exec_bounded]
+enabled = false
+max_magnitude_per_action = 0
+
+[agent.domains.net_out_http]
+enabled = false
+max_magnitude_per_action = 0

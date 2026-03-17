@@ -12,11 +12,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "ama"
-version = "0.1.0-p1-held"
+name = "ama-core"
+version = "0.2.0-p2-held"
 dependencies = [
- "axum",
- "axum-test",
  "bytes",
  "dashmap",
  "libc",
@@ -28,6 +26,22 @@ dependencies = [
  "thiserror",
  "tokio",
  "toml",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "ama-daemon"
+version = "0.2.0-p2-held"
+dependencies = [
+ "ama-core",
+ "axum",
+ "axum-test",
+ "bytes",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
  "tower",
  "tower-http",
  "tracing",

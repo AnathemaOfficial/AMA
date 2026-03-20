@@ -1,4 +1,5 @@
-<img width="1199" height="349" alt="SAFA" src="https://github.com/user-attachments/assets/cea720b0-9823-45d1-8300-5fd61b9efc9f" />
+
+<img width="1536" height="1024" alt="ChatGPT Image 19 mars 2026, 21 h 27 min 38 s" src="https://github.com/user-attachments/assets/a14fdbd3-f3c4-4245-837c-ce81a4827dbd" />
 
 ### SAFA — SLIME Adapter for Agents
 

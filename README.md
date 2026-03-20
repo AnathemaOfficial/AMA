@@ -1,10 +1,12 @@
 # SAFA — SLIME Adapter for Agents
 
-> Formerly **AMA** (Agent Machine Armor). Universal law-adapter membrane for AI agents.
+> An agent adapter over the SLIME law-layer.
 
-SAFA translates agent intentions into canonical SLIME domains and permits real-world
-actuation only after binary authorization. It is **not** an agent — it is an adapter,
-proxy, translator, and minimal executor.
+**SAFA** is the agent-facing adaptation layer that connects autonomous agents to a constrained actuation path enforced by SLIME. It translates agent intentions into canonical SLIME domains and permits real-world actuation only after binary authorization.
+
+SAFA is **not** an agent — it is an adapter, proxy, translator, and minimal executor.
+
+> *This project was initially developed under the working name **AMA** (Agent Machine Armor). The rename to SAFA reflects the architecture more accurately.*
 
 ```
 Agent → SAFA → SLIME/AB-S → Real world actuation

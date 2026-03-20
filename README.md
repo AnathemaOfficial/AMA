@@ -1,6 +1,6 @@
 <img width="1536" height="1024" alt="ChatGPT Image 19 mars 2026, 21 h 27 min 38 s" src="https://github.com/user-attachments/assets/8a53e02c-3396-448b-9806-5ce8b4fc9d5e" />
 
-## SAFA — SLIME Adapter for Agents
+### SAFA — SLIME Adapter for Agents
 
 > Formerly **AMA** (Agent Machine Armor). Universal law-adapter membrane for AI agents.
 

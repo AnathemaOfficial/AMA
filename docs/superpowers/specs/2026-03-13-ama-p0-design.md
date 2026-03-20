@@ -1,6 +1,6 @@
-# AMA P0 Design Specification
+# SAFA P0 Design Specification
 
-**Document ID:** `MN-001-AMA-P0-SPEC-20260313`
+**Document ID:** `MN-001-SAFA-P0-SPEC-20260313`
 **Status:** SEALED
 **Date:** 2026-03-13
 **Authors:** Sebastien Bouchard (Fireplank), Claude, GPT-4, Qwen
@@ -12,22 +12,22 @@
 
 ### Purpose
 
-AMA (Agent Machine Armor) is a universal membrane placed between an AI agent and real actuation surfaces: filesystem, bounded binary execution, and outbound network access. It translates agent intentions into canonical actions, validates them through SLIME/AB-S, and permits real-world actuation only after binary authorization.
+SAFA (SLIME Adapter for Agents) is a universal membrane placed between an AI agent and real actuation surfaces: filesystem, bounded binary execution, and outbound network access. It translates agent intentions into canonical actions, validates them through SLIME/AB-S, and permits real-world actuation only after binary authorization.
 
-AMA is not an agent. It is an adapter, proxy, validator, and minimal actuator.
+SAFA is not an agent. It is an adapter, proxy, validator, and minimal actuator.
 
-**One-line definition:** *"AMA translates agent intentions into canonical SLIME domains and permits real-world actuation only after binary authorization."*
+**One-line definition:** *"SAFA translates agent intentions into canonical SLIME domains and permits real-world actuation only after binary authorization."*
 
 ### Non-Goals (P0)
 
-- **Not an agent:** AMA makes no semantic or strategic decisions.
+- **Not an agent:** SAFA makes no semantic or strategic decisions.
 - **Not a latency optimization layer:** Interception standardization is the goal.
 - **No inbound network actuation** (listen/accept) in P0.
 - **No TLS in P0:** Localhost-only transport.
 - **No complex authentication in P0.**
 - **No multi-tenancy in P0.**
 - **No arbitrary shell execution:** Intent mapping only, never raw shell strings.
-- **No semantic explanation of decisions:** AMA may return minimal status and local structural errors, but never policy-style reasoning ("why this action was forbidden").
+- **No semantic explanation of decisions:** SAFA may return minimal status and local structural errors, but never policy-style reasoning ("why this action was forbidden").
 - P0 is designed for single-host local deployment and binds only to `127.0.0.1`. It does not attempt to defend against a fully compromised local host.
 
 ---
@@ -47,7 +47,7 @@ AMA is not an agent. It is an adapter, proxy, validator, and minimal actuator.
 |--------|----------------|--------------------------------------------------|
 | `POST` | `/ama/action`  | Submit action for validation + actuation.        |
 | `GET`  | `/health`      | Liveness check.                                  |
-| `GET`  | `/version`     | Returns AMA version and schema version.          |
+| `GET`  | `/version`     | Returns SAFA version and schema version.          |
 | `GET`  | `/ama/status`  | Read-only thermodynamic state (capacity, domains).|
 
 ### Headers & Content-Type
@@ -137,16 +137,16 @@ When `"dry_run": true`:
 
 ### Failure Mode
 
-- **Fail-Closed:** If AB-S is unreachable or any unexpected error occurs, AMA MUST return `503` and MUST NOT perform any actuation.
+- **Fail-Closed:** If AB-S is unreachable or any unexpected error occurs, SAFA MUST return `503` and MUST NOT perform any actuation.
 - Logs internal error for operator diagnosis; returns generic `503` to client.
 
 ---
 
 ## Section 3 — Canonical Action Model
 
-### Input Schema (Agent -> AMA)
+### Input Schema (Agent -> SAFA)
 
-Agents submit a universal JSON structure. AMA enforces strict structural validation before any semantic processing.
+Agents submit a universal JSON structure. SAFA enforces strict structural validation before any semantic processing.
 
 ```json
 {
@@ -164,7 +164,7 @@ Agents submit a universal JSON structure. AMA enforces strict structural validat
 | `adapter`   | string         | Yes         | Agent identifier (e.g., `"openclaw"`, `"generic"`, `"langchain"`). Used for **audit trails** and observability. Does not affect authorization logic. **MUST NOT** affect validation, authorization, or actuation. |
 | `action`    | string         | Yes         | Canonical action class. Must match an entry in `domains.toml`. Unknown action -> `422`. |
 | `target`    | string         | Yes         | Action target: relative file path, shell intent ID, or URL. Format validated per action type. |
-| `magnitude` | u64            | Yes         | Claimed cost units. Range: `1 <= magnitude <= 1000` (P0). Out of bounds -> `422`. AMA MAY reject, clamp, or recompute effective magnitude per domain rules before SLIME authorization. |
+| `magnitude` | u64            | Yes         | Claimed cost units. Range: `1 <= magnitude <= 1000` (P0). Out of bounds -> `422`. SAFA MAY reject, clamp, or recompute effective magnitude per domain rules before SLIME authorization. |
 | `dry_run`   | bool           | No          | Default `false`. If `true`, skips actuation step only. |
 | `method`    | string         | Conditional | For `http_request` only. Must be `"GET"` or `"POST"` (P0). Required when `action` is `http_request`. Absent or invalid -> `422`. |
 | `payload`   | string or null | Conditional | Action data (file content, HTTP body). Required for `file_write`. Optional for `http_request` (POST body). Null for read-only ops. Max per-domain limit. |
@@ -251,7 +251,7 @@ Canonical actions are versioned implicitly by the `schema_version` field in `dom
 
 ### Semantic Boundary
 
-**AMA does not interpret agent intent beyond canonical mapping. All semantic meaning is discarded before SLIME authorization.**
+**SAFA does not interpret agent intent beyond canonical mapping. All semantic meaning is discarded before SLIME authorization.**
 
 ---
 
@@ -259,7 +259,7 @@ Canonical actions are versioned implicitly by the `schema_version` field in `dom
 
 ### Philosophy
 
-AMA acts as a stateless translator. It maps agent intents to SLIME domains using static, versioned configuration files. No semantic interpretation occurs. If the mapping fails, the action is structurally invalid.
+SAFA acts as a stateless translator. It maps agent intents to SLIME domains using static, versioned configuration files. No semantic interpretation occurs. If the mapping fails, the action is structurally invalid.
 
 ### Configuration Hierarchy
 
@@ -422,13 +422,13 @@ pub enum ActionResult {
 ```
 
 **Truncation limits (P0):**
-- `FileRead`: Max 512 KiB returned. AMA stops reading at the cap (bounded reading).
+- `FileRead`: Max 512 KiB returned. SAFA stops reading at the cap (bounded reading).
 - `ShellExec`: Max 64 KiB per stream (stdout/stderr).
 - `HttpResponse`: Max 256 KiB body.
 
 If data is truncated, `truncated: true` AND `total_bytes` (when known) are returned. The agent MUST be aware of data loss. Hiding truncation is forbidden.
 
-**Text-oriented P0:** AMA P0 supports text-oriented outputs only. Non-UTF-8 data results in actuator failure (`503`). Binary output support is out of scope for P0.
+**Text-oriented P0:** SAFA P0 supports text-oriented outputs only. Non-UTF-8 data results in actuator failure (`503`). Binary output support is out of scope for P0.
 
 ---
 
@@ -486,12 +486,12 @@ The Actuator is the final mechanical stage. It executes ONLY if authorized by SL
 | Commands accepted      | Only intents defined in `intents.toml`.         | Closed set. |
 | Args construction      | Vector concatenation of typed args.             | No string interpolation. |
 | Process isolation      | New process group (`setpgid`).                  | Allows killing entire family tree. |
-| Working directory      | Set on child process directly.                  | Parent AMA process CWD **never** changed. |
-| Environment            | Fresh minimal. Not inherited from parent.       | `PATH=/usr/bin:/bin`, `HOME=<workspace_root>`, `LANG=en_US.UTF-8`, `AMA_ACTION_ID=<uuid>` |
+| Working directory      | Set on child process directly.                  | Parent SAFA process CWD **never** changed. |
+| Environment            | Fresh minimal. Not inherited from parent.       | `PATH=/usr/bin:/bin`, `HOME=<workspace_root>`, `LANG=en_US.UTF-8`, `SAFA_ACTION_ID=<uuid>` |
 | stdout/stderr          | Captured separately, max 64 KiB each.           | Truncation flagged. |
 | Non-UTF-8 output       | Actuator failure (`503`).                       | P0 text-oriented. |
 | Timeout                | 15s hard limit.                                 | Kill sequence below. |
-| Exit code              | Returned as-is.                                 | AMA does not interpret success/failure. |
+| Exit code              | Returned as-is.                                 | SAFA does not interpret success/failure. |
 | Descendant containment | Process-group termination where supported.      | P0 does not guarantee perfect prevention across all platforms. |
 
 **Kill sequence:**
@@ -513,7 +513,7 @@ The Actuator is the final mechanical stage. It executes ONLY if authorized by SL
 | POST body max       | 256 KiB (per-domain configurable).                |
 | Response body max   | 256 KiB. Truncated with `truncated: true`.        |
 | Non-UTF-8 response  | Rejected. P0 text-oriented.                       |
-| User-Agent          | `AMA/0.1.0` (fixed, not configurable by agent).  |
+| User-Agent          | `SAFA/0.1.0` (fixed, not configurable by agent).  |
 | Headers              | No custom headers in P0.                          |
 | Cookies             | Disabled. No HTTP state.                          |
 | Streaming           | No. Complete buffered response.                   |
@@ -525,7 +525,7 @@ The Actuator is the final mechanical stage. It executes ONLY if authorized by SL
 | Rule               | Application                                       |
 |---------------------|---------------------------------------------------|
 | **Fail-Closed**    | Any unexpected error during actuation -> `503`. No partial results fabricated. |
-| **No Retry**       | AMA never retries a failed actuation. Agent must resubmit. |
+| **No Retry**       | SAFA never retries a failed actuation. Agent must resubmit. |
 | **Cleanup**        | Failed writes delete `.ama.<action_id>.tmp`. No orphan files. |
 | **Concurrency**    | No file locking in P0. Concurrent outcomes are timing-dependent (last successful atomic rename wins). |
 | **Logging**        | Metadata-only per action. See Audit section below. |
@@ -559,10 +559,10 @@ The `request_hash` is computed over the canonical action representation (not raw
 
 ### Architecture Choice: Embedded
 
-For P0, Anathema-Breaker State (AB-S) is **embedded directly** into the AMA binary as a Rust library (`no_std` compatible).
+For P0, Anathema-Breaker State (AB-S) is **embedded directly** into the SAFA binary as a Rust library (`no_std` compatible).
 
 - **No Network Dependency:** Zero latency, zero external SPOF.
-- **Fail-Secure:** If AMA runs, the Law runs.
+- **Fail-Secure:** If SAFA runs, the Law runs.
 - **Deterministic:** Pure function evaluation. Same input -> Same verdict, always.
 
 The authorization interface MUST remain identical between embedded and remote modes. Remote SLIME via HTTP/gRPC is deferred to P1.
@@ -588,7 +588,7 @@ pub enum SlimeVerdict {
 - **Total:** Covers all possible domain_ids (unknown -> Impossible).
 - **Synchrone:** No async, no timeout.
 
-**DomainId values are stable string identifiers defined by the AMA schema.** They do not change between versions without a schema version bump.
+**DomainId values are stable string identifiers defined by the SAFA schema.** They do not change between versions without a schema version bump.
 
 ### Thermodynamic Accounting (SYF-Shield)
 
@@ -655,9 +655,9 @@ impl SlimeAuthorizer for P0Authorizer {
 
 - **Monotonicity:** Capacity only increases. No API to decrement or reset during runtime.
 - **Session Boundary:** Capacity resets to `0` ONLY on full process restart (voluntary, crash, or upgrade).
-- **Session ID:** On boot, AMA generates a random `session_id` (UUID v4). All audit logs include `session_id`. Enables detection of abnormal restart loops.
+- **Session ID:** On boot, SAFA generates a random `session_id` (UUID v4). All audit logs include `session_id`. Enables detection of abnormal restart loops.
 - **Cold Start Only:** To change laws or reset capacity, the operator must stop and restart the process. This is a feature, not a bug (Thermodynamic Cooling).
-- **Restart-loop protection** is delegated to the operating system (systemd restart limits, container policies). AMA does not self-protect against forced restarts.
+- **Restart-loop protection** is delegated to the operating system (systemd restart limits, container policies). SAFA does not self-protect against forced restarts.
 
 ### Configuration (config.toml — The Law at Boot)
 
@@ -708,7 +708,7 @@ max_magnitude_per_action = 200
 
 #### Startup Validation Rules
 
-AMA MUST refuse to start (exit non-zero) if ANY of the following conditions are met:
+SAFA MUST refuse to start (exit non-zero) if ANY of the following conditions are met:
 1. Any configuration file (`config.toml`, `domains.toml`, `intents.toml`, `allowlist.toml`) is absent or unparseable.
 2. Any `schema_version` field is unrecognized (unknown version -> refuse to start).
 3. `workspace_root` does not exist, is not a directory, or is not an absolute path.
@@ -717,7 +717,7 @@ AMA MUST refuse to start (exit non-zero) if ANY of the following conditions are 
 6. `bind_host` is anything other than `127.0.0.1` in P0.
 7. Any internal inconsistency between config files (e.g., action referencing non-existent domain).
 
-On startup failure, AMA MUST log the specific validation error and exit. No partial operation is permitted.
+On startup failure, SAFA MUST log the specific validation error and exit. No partial operation is permitted.
 
 #### Graceful Shutdown
 
@@ -732,15 +732,15 @@ On `SIGKILL` or crash: no cleanup guaranteed. Orphan `.ama.<action_id>.tmp` file
 
 #### Platform Target
 
-P0 targets **Linux** as the primary platform. POSIX-specific APIs (`setpgid`, `execv`, `lstat`, `SIGTERM`, `SIGKILL`) are used directly. macOS is expected to work with minimal changes. **Windows** is NOT a P0 target for the actuator layer — the AMA binary compiles on Windows for development, but shell_exec and POSIX process isolation features are Linux-only.
+P0 targets **Linux** as the primary platform. POSIX-specific APIs (`setpgid`, `execv`, `lstat`, `SIGTERM`, `SIGKILL`) are used directly. macOS is expected to work with minimal changes. **Windows** is NOT a P0 target for the actuator layer — the SAFA binary compiles on Windows for development, but shell_exec and POSIX process isolation features are Linux-only.
 
 #### Magnitude Semantics
 
-Magnitude is **agent-declared and AMA-validated**. The agent claims a cost, and AMA enforces bounds:
+Magnitude is **agent-declared and SAFA-validated**. The agent claims a cost, and SAFA enforces bounds:
 - Range: `1 <= magnitude <= domain.max_magnitude_per_action`.
-- AMA does NOT recompute magnitude from action properties in P0 (e.g., file size does not auto-set magnitude).
+- SAFA does NOT recompute magnitude from action properties in P0 (e.g., file size does not auto-set magnitude).
 - The agent is responsible for declaring reasonable magnitudes. An agent declaring `magnitude: 1` for every action is allowed but will exhaust capacity faster than an agent declaring proportional values.
-- P1 MAY introduce AMA-computed magnitude overrides (e.g., `magnitude = max(declared, file_size_kb)`).
+- P1 MAY introduce SAFA-computed magnitude overrides (e.g., `magnitude = max(declared, file_size_kb)`).
 
 ### Observability (Read-Only)
 
@@ -782,13 +782,13 @@ This endpoint is **read-only**. No mutation of state via HTTP. The only way to m
 
 ### 7.1 — Trust Boundaries
 
-AMA assumes a **Single-Host Local Trust Boundary**.
+SAFA assumes a **Single-Host Local Trust Boundary**.
 
-- **Trusted:** AMA binary, embedded AB-S, configuration files (loaded at boot, hashed).
+- **Trusted:** SAFA binary, embedded AB-S, configuration files (loaded at boot, hashed).
 - **Untrusted:** All incoming HTTP requests (regardless of local origin), actuation targets (filesystem, network responses, process outputs).
 - **Out of Scope:** Host OS compromise (root attacker), physical access.
 
-All incoming HTTP requests to AMA are untrusted input, regardless of origin (local agents, scripts, or other processes).
+All incoming HTTP requests to SAFA are untrusted input, regardless of origin (local agents, scripts, or other processes).
 
 ### 7.2 — Threats Prevented Structurally
 
@@ -816,8 +816,8 @@ All incoming HTTP requests to AMA are untrusted input, regardless of origin (loc
 
 | Threat                       | Why Not Covered                                     | Future Mitigation           |
 |------------------------------|------------------------------------------------------|-----------------------------|
-| **Compromised Host**         | AMA cannot defend against root/kernel attacks.       | P1: seccomp, namespaces.    |
-| **Semantic Malice**          | AMA validates **form**, not **content**. Writing valid but malicious content is structurally permitted. This is by design: AMA enforces the *physics* of action, the Agent owns the *logic*. | Out of scope (agent responsibility). |
+| **Compromised Host**         | SAFA cannot defend against root/kernel attacks.       | P1: seccomp, namespaces.    |
+| **Semantic Malice**          | SAFA validates **form**, not **content**. Writing valid but malicious content is structurally permitted. This is by design: SAFA enforces the *physics* of action, the Agent owns the *logic*. | Out of scope (agent responsibility). |
 | **Config Tampering**         | TOML modified before boot -> bad laws loaded.        | P0+: SHA-256 hashes logged at boot. P1: signatures. |
 | **Timing Side-Channels**     | Response times may vary by action type.              | P1: constant-time padding.  |
 | **Restart Loop**             | Forced restarts reset capacity.                      | Detection via `session_id`. Protection delegated to OS (systemd limits). |
@@ -827,7 +827,7 @@ All incoming HTTP requests to AMA are untrusted input, regardless of origin (loc
 
 ### 7.4 — Security Invariants (Normative)
 
-These invariants MUST hold true at all times during AMA execution. Violation is a critical bug.
+These invariants MUST hold true at all times during SAFA execution. Violation is a critical bug.
 
 1. **No Shell Interpretation:** Every process execution uses `execv()` with a pre-validated argument vector. No string concatenation for commands.
 2. **Workspace Containment:** No resolved path ever exits `workspace_root`. Verified after canonicalization and symlink resolution on every component.
@@ -846,7 +846,7 @@ These invariants MUST hold true at all times during AMA execution. Violation is 
 ## Appendix A — File Structure
 
 ```
-AMA/
+SAFA/
 ├── src/
 │   ├── main.rs           # Entry point, server setup
 │   ├── config.rs          # TOML loading, validation, hashing

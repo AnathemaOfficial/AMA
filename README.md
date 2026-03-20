@@ -1,18 +1,18 @@
-# AMA — Agent Machine Armor
+# SAFA — SLIME Adapter for Agents
 
-> Universal law-adapter membrane for AI agents.
+> Formerly **AMA** (Agent Machine Armor). Universal law-adapter membrane for AI agents.
 
-AMA translates agent intentions into canonical SLIME domains and permits real-world
+SAFA translates agent intentions into canonical SLIME domains and permits real-world
 actuation only after binary authorization. It is **not** an agent — it is an adapter,
 proxy, translator, and minimal executor.
 
 ```
-Agent → AMA → SLIME/AB-S → Real world actuation
+Agent → SAFA → SLIME/AB-S → Real world actuation
 ```
 
 ## Status
 
-**AMA P2 — HELD** (Multi-Agent Capacity System)
+**SAFA P2 — HELD** (Multi-Agent Capacity System)
 
 - **P0** validated the full pipeline: **validate → map → authorize → actuate**
 - **P1** hardened for concurrent use: idempotency races (C2), rate limiter races (C3), bounded admission, execution timeouts
@@ -24,12 +24,12 @@ Known issues documented in [`docs/KNOWN_ISSUES_P1.md`](docs/KNOWN_ISSUES_P1.md).
 
 ## Architecture
 
-AMA is a Cargo workspace with two crates:
+SAFA is a Cargo workspace with two crates:
 
 | Crate | Role | HTTP dependency |
 |-------|------|-----------------|
-| **ama-core** | Decision law engine (validate, map, authorize, actuate) | None |
-| **ama-daemon** | HTTP transport wrapper (axum, rate limiting, routing) | axum 0.8 |
+| **safa-core** | Decision law engine (validate, map, authorize, actuate) | None |
+| **safa-daemon** | HTTP transport wrapper (axum, rate limiting, routing) | axum 0.8 |
 
 ```
 Agent (OpenClaw, LangChain, etc.)
@@ -39,10 +39,10 @@ Agent (OpenClaw, LangChain, etc.)
   │  Idempotency-Key: <uuid>
   │
   ▼
-┌──────────────────── ama-daemon ─────────────────────┐
+┌──────────────────── safa-daemon ─────────────────────┐
 │  resolve_agent_id() → per-agent rate limit check    │
 │                                                     │
-│  ┌──────────────── ama-core ──────────────────┐     │
+│  ┌──────────────── safa-core ──────────────────┐     │
 │  │  1. Validate     magnitude, field exclusivity│    │
 │  │  2. Canonicalize  → CanonicalAction (newtypes)│   │
 │  │  3. Map           → domain_id (domains.toml) │   │
@@ -72,11 +72,14 @@ Rust 1.93 · axum 0.8 · tokio · serde · dashmap · sha2 · reqwest · tracing
 
 ```bash
 cargo build --workspace --release
-./target/release/ama-daemon
+./target/release/safa-daemon
 # Listens on 127.0.0.1:8787
 ```
 
 ## Endpoints
+
+> **Note:** Endpoints currently use the `/ama/` prefix for backward compatibility.
+> A future release will migrate to `/safa/` with dual-support transition.
 
 | Method | Path | Description |
 |--------|------|-------------|

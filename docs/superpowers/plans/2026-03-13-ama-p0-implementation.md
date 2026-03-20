@@ -1,8 +1,8 @@
-# AMA P0 Implementation Plan
+# SAFA P0 Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build AMA P0 — a deterministic security membrane between AI agents and real-world actuation (filesystem, shell, HTTP).
+**Goal:** Build SAFA P0 — a deterministic security membrane between AI agents and real-world actuation (filesystem, shell, HTTP).
 
 **Architecture:** HTTP server on 127.0.0.1:8787 receives JSON actions, validates via newtypes, maps to SLIME domains, authorizes via embedded AB-S (atomic CAS capacity), actuates if authorized. Fail-closed everywhere.
 
@@ -17,7 +17,7 @@
 ## File Structure
 
 ```
-AMA/
+SAFA/
 ├── Cargo.toml
 ├── src/
 │   ├── main.rs              # Entry point: load config, build state, start server
@@ -66,7 +66,7 @@ AMA/
 - [ ] **Step 1: Initialize Cargo project**
 
 ```bash
-cd "F:/SYF PROJECT/AMA"
+cd "F:/SYF PROJECT/SAFA"
 cargo init --name ama
 ```
 
@@ -77,7 +77,7 @@ cargo init --name ama
 name = "ama"
 version = "0.1.0"
 edition = "2021"
-description = "Agent Machine Armor — Deterministic security membrane for AI agents"
+description = "SLIME Adapter for Agents — Deterministic security membrane for AI agents"
 
 [dependencies]
 axum = "0.8"
@@ -188,7 +188,7 @@ mod errors;
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
-    tracing::info!("AMA P0 starting...");
+    tracing::info!("SAFA P0 starting...");
     // Config loading, server setup will be added in later tasks
 }
 ```
@@ -532,7 +532,7 @@ use ama::errors;
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
-    tracing::info!("AMA P0 starting...");
+    tracing::info!("SAFA P0 starting...");
 }
 ```
 
@@ -1999,7 +1999,7 @@ pub async fn shell_exec(
         .env("PATH", "/usr/bin:/bin")
         .env("HOME", working_dir)
         .env("LANG", "en_US.UTF-8")
-        .env("AMA_ACTION_ID", action_id);
+        .env("SAFA_ACTION_ID", action_id);
 
     // SAFETY: pre_exec runs after fork, before exec in child process.
     // setpgid(0,0) puts child in its own process group for kill containment.
@@ -2166,7 +2166,7 @@ const MAX_RESPONSE_BYTES: usize = 262_144; // 256 KiB
 const MAX_REDIRECTS: usize = 3;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const TOTAL_TIMEOUT: Duration = Duration::from_secs(15);
-const USER_AGENT: &str = "AMA/0.1.0";
+const USER_AGENT: &str = "SAFA/0.1.0";
 
 /// Result of an HTTP request.
 #[derive(Debug)]
@@ -2692,7 +2692,7 @@ pub fn log_audit(entry: &AuditEntry) {
         status = %entry.status,
         request_hash = %entry.request_hash,
         truncated = entry.truncated,
-        "AMA_AUDIT"
+        "SAFA_AUDIT"
     );
 }
 ```
@@ -3373,7 +3373,7 @@ async fn handle_health() -> impl IntoResponse {
     Json(json!({"status": "ok"}))
 }
 
-/// GET /version — Returns AMA version and schema version (spec Section 2).
+/// GET /version — Returns SAFA version and schema version (spec Section 2).
 async fn handle_version() -> impl IntoResponse {
     Json(json!({
         "name": "ama",
@@ -3674,14 +3674,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Bind to localhost only (spec Section 2)
     let listener = tokio::net::TcpListener::bind(&bind_addr).await?;
-    tracing::info!(addr = %bind_addr, "AMA P0 listening");
+    tracing::info!(addr = %bind_addr, "SAFA P0 listening");
 
     // Start server with graceful shutdown (M8)
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await?;
 
-    tracing::info!("AMA P0 shut down cleanly");
+    tracing::info!("SAFA P0 shut down cleanly");
     Ok(())
 }
 ```
@@ -3706,7 +3706,7 @@ git add -A && git commit -m "feat: axum HTTP server with full pipeline integrati
 - [ ] **Step 1: Manual smoke test (Linux/WSL)**
 
 ```bash
-# Terminal 1: start AMA
+# Terminal 1: start SAFA
 cargo run
 
 # Terminal 2: test endpoints
@@ -3718,7 +3718,7 @@ curl http://127.0.0.1:8787/ama/status
 curl -X POST http://127.0.0.1:8787/ama/action \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: $(uuidgen)" \
-  -d '{"adapter":"test","action":"file_write","target":"hello.txt","magnitude":1,"payload":"Hello AMA!"}'
+  -d '{"adapter":"test","action":"file_write","target":"hello.txt","magnitude":1,"payload":"Hello SAFA!"}'
 
 # Verify file exists
 cat /tmp/ama-workspace/hello.txt

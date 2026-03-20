@@ -1,10 +1,10 @@
-# AMA P2 — Multi-Agent Capacity System Implementation Plan
+# SAFA P2 — Multi-Agent Capacity System Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Transform AMA from a single global capacity budget into a multi-agent system where each agent gets its own capacity configuration, rate limits, and budget counters — while preserving the monotonic thermodynamic model.
+**Goal:** Transform SAFA from a single global capacity budget into a multi-agent system where each agent gets its own capacity configuration, rate limits, and budget counters — while preserving the monotonic thermodynamic model.
 
-**Architecture:** Split into `ama-core` (pure Rust library, zero HTTP dependency) and `ama-daemon` (axum HTTP wrapper). Agent configs loaded from `config/agents/*.toml` at boot. `X-Agent-Id` header selects the agent context (NOT authentication). Each agent gets its own `P0Authorizer` instance and rate limiter. Idempotency cache stays global.
+**Architecture:** Split into `safa-core` (pure Rust library, zero HTTP dependency) and `safa-daemon` (axum HTTP wrapper). Agent configs loaded from `config/agents/*.toml` at boot. `X-Agent-Id` header selects the agent context (NOT authentication). Each agent gets its own `P0Authorizer` instance and rate limiter. Idempotency cache stays global.
 
 **Tech Stack:** Rust, axum 0.8, tokio, DashMap, Tower middleware, TOML config, SHA-256 boot integrity
 
@@ -51,14 +51,14 @@ config/config.toml                    config/config.toml (global only, no [slime
 
 ## Chunk 1: Workspace Crate Split
 
-Split the single `ama` crate into a Cargo workspace with two members: `ama-core` (library) and `ama-daemon` (binary). All 94 existing tests must pass after the split.
+Split the single `ama` crate into a Cargo workspace with two members: `safa-core` (library) and `safa-daemon` (binary). All 94 existing tests must pass after the split.
 
 ### Task 1: Create workspace Cargo.toml
 
 **Files:**
 - Create: `Cargo.toml` (workspace root — replaces current)
-- Create: `ama-core/Cargo.toml`
-- Create: `ama-daemon/Cargo.toml`
+- Create: `safa-core/Cargo.toml`
+- Create: `safa-daemon/Cargo.toml`
 
 - [ ] **Step 1: Back up current Cargo.toml**
 
@@ -70,18 +70,18 @@ cp Cargo.toml Cargo.toml.p1-backup
 
 ```toml
 [workspace]
-members = ["ama-core", "ama-daemon"]
+members = ["safa-core", "safa-daemon"]
 resolver = "2"
 ```
 
-- [ ] **Step 3: Create ama-core/Cargo.toml**
+- [ ] **Step 3: Create safa-core/Cargo.toml**
 
 ```toml
 [package]
-name = "ama-core"
+name = "safa-core"
 version = "0.2.0-p2-dev"
 edition = "2021"
-description = "AMA core library — deterministic security membrane for AI agents (no HTTP)"
+description = "SAFA core library — deterministic security membrane for AI agents (no HTTP)"
 
 [features]
 test-utils = []
@@ -106,20 +106,20 @@ tempfile = "3"
 tokio = { version = "1", features = ["full", "test-util"] }
 ```
 
-- [ ] **Step 4: Create ama-daemon/Cargo.toml**
+- [ ] **Step 4: Create safa-daemon/Cargo.toml**
 
 ```toml
 [package]
-name = "ama-daemon"
+name = "safa-daemon"
 version = "0.2.0-p2-dev"
 edition = "2021"
-description = "AMA HTTP daemon — axum wrapper for ama-core"
+description = "SAFA HTTP daemon — axum wrapper for safa-core"
 
 [features]
-test-utils = ["dep:axum-test", "ama-core/test-utils"]
+test-utils = ["dep:axum-test", "safa-core/test-utils"]
 
 [dependencies]
-ama-core = { path = "../ama-core" }
+safa-core = { path = "../safa-core" }
 axum = "0.8"
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
@@ -173,30 +173,30 @@ required-features = ["test-utils"]
 - [ ] **Step 5: Commit workspace scaffolding**
 
 ```bash
-git add Cargo.toml Cargo.toml.p1-backup ama-core/Cargo.toml ama-daemon/Cargo.toml
-git commit -m "feat(p2): scaffold workspace with ama-core and ama-daemon crates"
+git add Cargo.toml Cargo.toml.p1-backup safa-core/Cargo.toml safa-daemon/Cargo.toml
+git commit -m "feat(p2): scaffold workspace with safa-core and safa-daemon crates"
 ```
 
-### Task 2: Move source files to ama-core
+### Task 2: Move source files to safa-core
 
 **Files:**
-- Move: `src/errors.rs` → `ama-core/src/errors.rs` (**strip axum IntoResponse impl** — see below)
-- Move: `src/newtypes.rs` → `ama-core/src/newtypes.rs`
-- Move: `src/canonical.rs` → `ama-core/src/canonical.rs`
-- Move: `src/schema.rs` → `ama-core/src/schema.rs`
-- Move: `src/config.rs` → `ama-core/src/config.rs`
-- Move: `src/slime.rs` → `ama-core/src/slime.rs`
-- Move: `src/mapper.rs` → `ama-core/src/mapper.rs`
-- Move: `src/actuator/` → `ama-core/src/actuator/`
-- Move: `src/idempotency.rs` → `ama-core/src/idempotency.rs`
-- Move: `src/audit.rs` → `ama-core/src/audit.rs`
-- Move: `src/pipeline.rs` → `ama-core/src/pipeline.rs`
-- Create: `ama-core/src/lib.rs`
+- Move: `src/errors.rs` → `safa-core/src/errors.rs` (**strip axum IntoResponse impl** — see below)
+- Move: `src/newtypes.rs` → `safa-core/src/newtypes.rs`
+- Move: `src/canonical.rs` → `safa-core/src/canonical.rs`
+- Move: `src/schema.rs` → `safa-core/src/schema.rs`
+- Move: `src/config.rs` → `safa-core/src/config.rs`
+- Move: `src/slime.rs` → `safa-core/src/slime.rs`
+- Move: `src/mapper.rs` → `safa-core/src/mapper.rs`
+- Move: `src/actuator/` → `safa-core/src/actuator/`
+- Move: `src/idempotency.rs` → `safa-core/src/idempotency.rs`
+- Move: `src/audit.rs` → `safa-core/src/audit.rs`
+- Move: `src/pipeline.rs` → `safa-core/src/pipeline.rs`
+- Create: `safa-core/src/lib.rs`
 
-- [ ] **Step 1: Create ama-core directory structure**
+- [ ] **Step 1: Create safa-core directory structure**
 
 ```bash
-mkdir -p ama-core/src/actuator
+mkdir -p safa-core/src/actuator
 ```
 
 - [ ] **Step 2: Move core modules**
@@ -204,21 +204,21 @@ mkdir -p ama-core/src/actuator
 **Note:** Use `cp` for now (git will detect renames via `git diff -M`). Cannot use `git mv` because we need to modify files during the move (e.g., stripping axum from errors.rs). History is preserved via rename detection.
 
 ```bash
-# Move all non-HTTP modules to ama-core
-cp src/errors.rs ama-core/src/errors.rs
-cp src/newtypes.rs ama-core/src/newtypes.rs
-cp src/canonical.rs ama-core/src/canonical.rs
-cp src/schema.rs ama-core/src/schema.rs
-cp src/config.rs ama-core/src/config.rs
-cp src/slime.rs ama-core/src/slime.rs
-cp src/mapper.rs ama-core/src/mapper.rs
-cp src/idempotency.rs ama-core/src/idempotency.rs
-cp src/audit.rs ama-core/src/audit.rs
-cp src/pipeline.rs ama-core/src/pipeline.rs
-cp -r src/actuator/* ama-core/src/actuator/
+# Move all non-HTTP modules to safa-core
+cp src/errors.rs safa-core/src/errors.rs
+cp src/newtypes.rs safa-core/src/newtypes.rs
+cp src/canonical.rs safa-core/src/canonical.rs
+cp src/schema.rs safa-core/src/schema.rs
+cp src/config.rs safa-core/src/config.rs
+cp src/slime.rs safa-core/src/slime.rs
+cp src/mapper.rs safa-core/src/mapper.rs
+cp src/idempotency.rs safa-core/src/idempotency.rs
+cp src/audit.rs safa-core/src/audit.rs
+cp src/pipeline.rs safa-core/src/pipeline.rs
+cp -r src/actuator/* safa-core/src/actuator/
 ```
 
-- [ ] **Step 3: Create ama-core/src/lib.rs**
+- [ ] **Step 3: Create safa-core/src/lib.rs**
 
 ```rust
 pub mod errors;
@@ -234,11 +234,11 @@ pub mod audit;
 pub mod pipeline;
 ```
 
-- [ ] **Step 4: Split errors.rs — remove axum dependency from ama-core**
+- [ ] **Step 4: Split errors.rs — remove axum dependency from safa-core**
 
-**CRITICAL:** `src/errors.rs` imports `axum::http::StatusCode` and implements `IntoResponse`. Since ama-core must have zero HTTP dependencies, split it:
+**CRITICAL:** `src/errors.rs` imports `axum::http::StatusCode` and implements `IntoResponse`. Since safa-core must have zero HTTP dependencies, split it:
 
-In `ama-core/src/errors.rs`, keep only the pure error enum:
+In `safa-core/src/errors.rs`, keep only the pure error enum:
 
 ```rust
 #[derive(Debug, thiserror::Error)]
@@ -269,7 +269,7 @@ pub enum AmaError {
 }
 ```
 
-Create `ama-daemon/src/error_response.rs` with the `IntoResponse` impl:
+Create `safa-daemon/src/error_response.rs` with the `IntoResponse` impl:
 
 ```rust
 use ama_core::errors::AmaError;
@@ -301,10 +301,10 @@ impl IntoResponse for AmaError {
 }
 ```
 
-**Note:** Rust orphan rules require that `IntoResponse` impl lives in the crate that owns `AmaError` OR the crate that owns `IntoResponse`. Since ama-core owns `AmaError`, we need a newtype wrapper in ama-daemon:
+**Note:** Rust orphan rules require that `IntoResponse` impl lives in the crate that owns `AmaError` OR the crate that owns `IntoResponse`. Since safa-core owns `AmaError`, we need a newtype wrapper in safa-daemon:
 
 ```rust
-// ama-daemon/src/error_response.rs
+// safa-daemon/src/error_response.rs
 pub struct AmaErrorResponse(pub AmaError);
 
 impl IntoResponse for AmaErrorResponse {
@@ -314,10 +314,10 @@ impl IntoResponse for AmaErrorResponse {
 }
 ```
 
-Or alternatively, add a `to_response(&self) -> (StatusCode, Json<Value>)` method on AmaError in ama-core that returns the status code as u16 + JSON body, and let ama-daemon call it. This avoids orphan rule issues entirely:
+Or alternatively, add a `to_response(&self) -> (StatusCode, Json<Value>)` method on AmaError in safa-core that returns the status code as u16 + JSON body, and let safa-daemon call it. This avoids orphan rule issues entirely:
 
 ```rust
-// ama-core/src/errors.rs
+// safa-core/src/errors.rs
 impl AmaError {
     /// Returns (HTTP status code, JSON body) for HTTP serialization.
     /// Does not depend on axum — status is a raw u16.
@@ -333,58 +333,58 @@ impl AmaError {
 ```
 
 ```rust
-// ama-daemon/src/server.rs — wherever AmaError needs to become a Response:
+// safa-daemon/src/server.rs — wherever AmaError needs to become a Response:
 fn ama_error_response(e: AmaError) -> Response {
     let (status, body) = e.http_status_and_body();
     (StatusCode::from_u16(status).unwrap(), axum::Json(body)).into_response()
 }
 ```
 
-**Recommended approach:** The `http_status_and_body()` method — cleanest, no orphan issues, no axum in ama-core.
+**Recommended approach:** The `http_status_and_body()` method — cleanest, no orphan issues, no axum in safa-core.
 
-- [ ] **Step 5: Update ama-core internal imports**
+- [ ] **Step 5: Update safa-core internal imports**
 
-Replace all `use crate::` references — they stay as `crate::` within ama-core (no change needed since they're now inside the ama-core crate). Remove `axum` from ama-core `Cargo.toml`.
+Replace all `use crate::` references — they stay as `crate::` within safa-core (no change needed since they're now inside the safa-core crate). Remove `axum` from safa-core `Cargo.toml`.
 
-Verify: `cd ama-core && cargo check`
+Verify: `cd safa-core && cargo check`
 
 - [ ] **Step 6: Commit core module move**
 
 ```bash
-git add ama-core/src/
-git commit -m "feat(p2): move core modules to ama-core crate"
+git add safa-core/src/
+git commit -m "feat(p2): move core modules to safa-core crate"
 ```
 
-### Task 3: Move HTTP layer to ama-daemon
+### Task 3: Move HTTP layer to safa-daemon
 
 **Files:**
-- Move: `src/server.rs` → `ama-daemon/src/server.rs`
-- Move: `src/main.rs` → `ama-daemon/src/main.rs`
-- Create: `ama-daemon/src/lib.rs`
+- Move: `src/server.rs` → `safa-daemon/src/server.rs`
+- Move: `src/main.rs` → `safa-daemon/src/main.rs`
+- Create: `safa-daemon/src/lib.rs`
 
-- [ ] **Step 1: Create ama-daemon directory structure**
+- [ ] **Step 1: Create safa-daemon directory structure**
 
 ```bash
-mkdir -p ama-daemon/src
+mkdir -p safa-daemon/src
 ```
 
 - [ ] **Step 2: Move daemon modules**
 
 ```bash
-cp src/server.rs ama-daemon/src/server.rs
-cp src/main.rs ama-daemon/src/main.rs
+cp src/server.rs safa-daemon/src/server.rs
+cp src/main.rs safa-daemon/src/main.rs
 ```
 
-- [ ] **Step 3: Create ama-daemon/src/lib.rs**
+- [ ] **Step 3: Create safa-daemon/src/lib.rs**
 
 ```rust
 pub mod server;
 pub mod error_response;
 ```
 
-- [ ] **Step 4: Update ama-daemon imports to use ama-core**
+- [ ] **Step 4: Update safa-daemon imports to use safa-core**
 
-In `ama-daemon/src/server.rs`, replace all `crate::` references with `ama_core::`:
+In `safa-daemon/src/server.rs`, replace all `crate::` references with `ama_core::`:
 
 ```rust
 use ama_core::config::AmaConfig;
@@ -395,7 +395,7 @@ use ama_core::schema::ActionRequest;
 use ama_core::slime::{P0Authorizer, SlimeAuthorizer};
 ```
 
-In `ama-daemon/src/main.rs`:
+In `safa-daemon/src/main.rs`:
 
 ```rust
 use ama_core::config::AmaConfig;
@@ -405,70 +405,70 @@ use ama_daemon::server::{AppState, build_router, shutdown_signal};
 
 Also update the `cleanup_orphan_temps` call and the `AmaError` response conversion to use `ama_core::` paths.
 
-- [ ] **Step 5: Verify ama-daemon compiles**
+- [ ] **Step 5: Verify safa-daemon compiles**
 
 ```bash
-cd ama-daemon && cargo check
+cd safa-daemon && cargo check
 ```
 
 - [ ] **Step 6: Commit daemon module move**
 
 ```bash
-git add ama-daemon/src/
-git commit -m "feat(p2): move HTTP layer to ama-daemon crate"
+git add safa-daemon/src/
+git commit -m "feat(p2): move HTTP layer to safa-daemon crate"
 ```
 
 ### Task 4: Move tests and verify green
 
 **Files:**
-- Move: `tests/test_newtypes.rs` → `ama-core/tests/test_newtypes.rs`
-- Move: `tests/test_schema.rs` → `ama-core/tests/test_schema.rs`
-- Move: `tests/test_config.rs` → `ama-core/tests/test_config.rs`
-- Move: `tests/test_slime.rs` → `ama-core/tests/test_slime.rs`
-- Move: `tests/test_mapper.rs` → `ama-core/tests/test_mapper.rs`
-- Move: `tests/test_actuator_file.rs` → `ama-core/tests/test_actuator_file.rs`
-- Move: `tests/test_actuator_shell.rs` → `ama-core/tests/test_actuator_shell.rs`
-- Move: `tests/test_actuator_http.rs` → `ama-core/tests/test_actuator_http.rs`
-- Move: `tests/test_idempotency.rs` → `ama-core/tests/test_idempotency.rs`
-- Move: `tests/test_audit.rs` → `ama-core/tests/test_audit.rs`
-- Move: `tests/test_pipeline.rs` → `ama-core/tests/test_pipeline.rs`
-- Move: `tests/test_integration.rs` → `ama-daemon/tests/test_integration.rs`
-- Move: `tests/p1_*.rs` → `ama-daemon/tests/p1_*.rs`
+- Move: `tests/test_newtypes.rs` → `safa-core/tests/test_newtypes.rs`
+- Move: `tests/test_schema.rs` → `safa-core/tests/test_schema.rs`
+- Move: `tests/test_config.rs` → `safa-core/tests/test_config.rs`
+- Move: `tests/test_slime.rs` → `safa-core/tests/test_slime.rs`
+- Move: `tests/test_mapper.rs` → `safa-core/tests/test_mapper.rs`
+- Move: `tests/test_actuator_file.rs` → `safa-core/tests/test_actuator_file.rs`
+- Move: `tests/test_actuator_shell.rs` → `safa-core/tests/test_actuator_shell.rs`
+- Move: `tests/test_actuator_http.rs` → `safa-core/tests/test_actuator_http.rs`
+- Move: `tests/test_idempotency.rs` → `safa-core/tests/test_idempotency.rs`
+- Move: `tests/test_audit.rs` → `safa-core/tests/test_audit.rs`
+- Move: `tests/test_pipeline.rs` → `safa-core/tests/test_pipeline.rs`
+- Move: `tests/test_integration.rs` → `safa-daemon/tests/test_integration.rs`
+- Move: `tests/p1_*.rs` → `safa-daemon/tests/p1_*.rs`
 
-- [ ] **Step 1: Move unit tests to ama-core**
+- [ ] **Step 1: Move unit tests to safa-core**
 
 ```bash
-mkdir -p ama-core/tests ama-daemon/tests
-# Unit tests → ama-core
-cp tests/test_newtypes.rs ama-core/tests/
-cp tests/test_schema.rs ama-core/tests/
-cp tests/test_config.rs ama-core/tests/
-cp tests/test_slime.rs ama-core/tests/
-cp tests/test_mapper.rs ama-core/tests/
-cp tests/test_actuator_file.rs ama-core/tests/
-cp tests/test_actuator_shell.rs ama-core/tests/
-cp tests/test_actuator_http.rs ama-core/tests/
-cp tests/test_idempotency.rs ama-core/tests/
-cp tests/test_audit.rs ama-core/tests/
-cp tests/test_pipeline.rs ama-core/tests/
-# Integration tests → ama-daemon
-cp tests/test_integration.rs ama-daemon/tests/
-cp tests/p1_idempotency.rs ama-daemon/tests/
-cp tests/p1_timeouts.rs ama-daemon/tests/
-cp tests/p1_rate_limit.rs ama-daemon/tests/
-cp tests/p1_queue.rs ama-daemon/tests/
-cp tests/p1_adversarial.rs ama-daemon/tests/
+mkdir -p safa-core/tests safa-daemon/tests
+# Unit tests → safa-core
+cp tests/test_newtypes.rs safa-core/tests/
+cp tests/test_schema.rs safa-core/tests/
+cp tests/test_config.rs safa-core/tests/
+cp tests/test_slime.rs safa-core/tests/
+cp tests/test_mapper.rs safa-core/tests/
+cp tests/test_actuator_file.rs safa-core/tests/
+cp tests/test_actuator_shell.rs safa-core/tests/
+cp tests/test_actuator_http.rs safa-core/tests/
+cp tests/test_idempotency.rs safa-core/tests/
+cp tests/test_audit.rs safa-core/tests/
+cp tests/test_pipeline.rs safa-core/tests/
+# Integration tests → safa-daemon
+cp tests/test_integration.rs safa-daemon/tests/
+cp tests/p1_idempotency.rs safa-daemon/tests/
+cp tests/p1_timeouts.rs safa-daemon/tests/
+cp tests/p1_rate_limit.rs safa-daemon/tests/
+cp tests/p1_queue.rs safa-daemon/tests/
+cp tests/p1_adversarial.rs safa-daemon/tests/
 ```
 
 - [ ] **Step 2: Update test imports**
 
-In all `ama-core/tests/*.rs` files, replace `use ama::` with `use ama_core::`.
+In all `safa-core/tests/*.rs` files, replace `use ama::` with `use ama_core::`.
 
-In all `ama-daemon/tests/*.rs` files, replace `use ama::` with the appropriate mix of `use ama_core::` (for types) and `use ama_daemon::` (for server helpers).
+In all `safa-daemon/tests/*.rs` files, replace `use ama::` with the appropriate mix of `use ama_core::` (for types) and `use ama_daemon::` (for server helpers).
 
 - [ ] **Step 3: Move test config fixtures**
 
-If tests reference `config/` directory, ensure test helpers use `tempdir` or that the config dir path is relative to workspace root, not crate root. The `test_server()` helper in `ama-daemon/src/server.rs` builds config programmatically so no file fixtures needed for integration tests.
+If tests reference `config/` directory, ensure test helpers use `tempdir` or that the config dir path is relative to workspace root, not crate root. The `test_server()` helper in `safa-daemon/src/server.rs` builds config programmatically so no file fixtures needed for integration tests.
 
 For `test_config.rs` which tests `AmaConfig::load()`, ensure the test config fixtures are accessible. Copy them or update paths:
 
@@ -506,7 +506,7 @@ cargo test --workspace --features test-utils
 
 ```bash
 git add -A
-git commit -m "feat(p2): complete crate split — ama-core + ama-daemon, 94 tests green"
+git commit -m "feat(p2): complete crate split — safa-core + safa-daemon, 94 tests green"
 ```
 
 ---
@@ -518,12 +518,12 @@ Add per-agent configuration files loaded from `config/agents/*.toml`. Each agent
 ### Task 5: Define AgentConfig type
 
 **Files:**
-- Modify: `ama-core/src/config.rs`
-- Test: `ama-core/tests/test_config.rs`
+- Modify: `safa-core/src/config.rs`
+- Test: `safa-core/tests/test_config.rs`
 
 - [ ] **Step 1: Write the failing test**
 
-In `ama-core/tests/test_config.rs`:
+In `safa-core/tests/test_config.rs`:
 
 ```rust
 #[test]
@@ -556,14 +556,14 @@ max_magnitude_per_action = 500
 - [ ] **Step 2: Run test to verify it fails**
 
 ```bash
-cargo test -p ama-core test_agent_config_loads_from_toml
+cargo test -p safa-core test_agent_config_loads_from_toml
 ```
 
 Expected: FAIL — `AgentConfig` does not exist.
 
 - [ ] **Step 3: Implement AgentConfig**
 
-In `ama-core/src/config.rs`, add:
+In `safa-core/src/config.rs`, add:
 
 ```rust
 // ── Agent Config (P2) ─────────────────────────────────────────
@@ -665,7 +665,7 @@ impl AgentConfig {
 - [ ] **Step 4: Run test to verify it passes**
 
 ```bash
-cargo test -p ama-core test_agent_config_loads_from_toml
+cargo test -p safa-core test_agent_config_loads_from_toml
 ```
 
 Expected: PASS
@@ -673,15 +673,15 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add ama-core/src/config.rs ama-core/tests/test_config.rs
+git add safa-core/src/config.rs safa-core/tests/test_config.rs
 git commit -m "feat(p2): add AgentConfig type with TOML parsing and validation"
 ```
 
 ### Task 6: Load agent configs from config/agents/ directory
 
 **Files:**
-- Modify: `ama-core/src/config.rs`
-- Test: `ama-core/tests/test_config.rs`
+- Modify: `safa-core/src/config.rs`
+- Test: `safa-core/tests/test_config.rs`
 
 - [ ] **Step 1: Write the failing test**
 
@@ -722,7 +722,7 @@ max_magnitude_per_action = 200
 - [ ] **Step 2: Run test to verify it fails**
 
 ```bash
-cargo test -p ama-core test_load_agent_configs_from_directory
+cargo test -p safa-core test_load_agent_configs_from_directory
 ```
 
 - [ ] **Step 3: Implement load_agent_configs**
@@ -780,7 +780,7 @@ pub fn load_agent_configs(agents_dir: &Path) -> Result<HashMap<String, AgentConf
 - [ ] **Step 4: Run test to verify it passes**
 
 ```bash
-cargo test -p ama-core test_load_agent_configs_from_directory
+cargo test -p safa-core test_load_agent_configs_from_directory
 ```
 
 - [ ] **Step 5: Write validation edge case tests**
@@ -822,22 +822,22 @@ fn test_load_agent_configs_rejects_empty_directory() {
 - [ ] **Step 6: Run all tests**
 
 ```bash
-cargo test -p ama-core
+cargo test -p safa-core
 ```
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add ama-core/src/config.rs ama-core/tests/test_config.rs
+git add safa-core/src/config.rs safa-core/tests/test_config.rs
 git commit -m "feat(p2): load agent configs from config/agents/ directory"
 ```
 
 ### Task 7: Integrate agent configs into AmaConfig and boot
 
 **Files:**
-- Modify: `ama-core/src/config.rs` (AmaConfig gets `agents` field)
-- Modify: `ama-core/src/config.rs` (BootHashes gets agent hashes)
-- Modify: `ama-daemon/src/main.rs` (boot loads agents)
+- Modify: `safa-core/src/config.rs` (AmaConfig gets `agents` field)
+- Modify: `safa-core/src/config.rs` (BootHashes gets agent hashes)
+- Modify: `safa-daemon/src/main.rs` (boot loads agents)
 
 - [ ] **Step 1: Add agents field to AmaConfig**
 
@@ -850,7 +850,7 @@ pub default_agent_id: Option<String>,
 
 - [ ] **Step 2: Update RawSlime to make domains/max_capacity optional (P1 backward compat)**
 
-In `ama-core/src/config.rs`, update `RawSlime`:
+In `safa-core/src/config.rs`, update `RawSlime`:
 
 ```rust
 #[derive(Deserialize)]
@@ -960,7 +960,7 @@ cargo test --workspace --features test-utils
 - [ ] **Step 6: Commit**
 
 ```bash
-git add ama-core/src/config.rs ama-daemon/src/main.rs
+git add safa-core/src/config.rs safa-daemon/src/main.rs
 git commit -m "feat(p2): integrate agent configs into AmaConfig boot with integrity hashes"
 ```
 
@@ -1008,7 +1008,7 @@ The `[slime]` section in `config.toml` keeps only global settings. Domain polici
 
 ```toml
 [ama]
-workspace_root = "F:\\SYF PROJECT\\AMA\\workspace"
+workspace_root = "F:\\SYF PROJECT\\SAFA\\workspace"
 bind_host = "127.0.0.1"
 bind_port = 8787
 
@@ -1036,12 +1036,12 @@ Replace the single `P0Authorizer` with a registry of per-agent authorizers. Each
 ### Task 9: Resolve DomainPolicy duplicate (I6)
 
 **Files:**
-- Modify: `ama-core/src/slime.rs`
-- Modify: `ama-core/src/config.rs`
+- Modify: `safa-core/src/slime.rs`
+- Modify: `safa-core/src/config.rs`
 
 - [ ] **Step 1: Make slime.rs use config::DomainPolicy**
 
-In `ama-core/src/slime.rs`, remove the local `DomainPolicy` struct and import from config:
+In `safa-core/src/slime.rs`, remove the local `DomainPolicy` struct and import from config:
 
 ```rust
 use crate::config::DomainPolicy;
@@ -1060,21 +1060,21 @@ Remove from slime.rs:
 - [ ] **Step 2: Run tests**
 
 ```bash
-cargo test -p ama-core
+cargo test -p safa-core
 ```
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add ama-core/src/slime.rs ama-core/src/config.rs
+git add safa-core/src/slime.rs safa-core/src/config.rs
 git commit -m "fix(p2): resolve DomainPolicy duplicate (I6) — single canonical type in config"
 ```
 
 ### Task 10: Create AgentAuthorizer (per-agent P0Authorizer wrapper)
 
 **Files:**
-- Modify: `ama-core/src/slime.rs`
-- Test: `ama-core/tests/test_slime.rs`
+- Modify: `safa-core/src/slime.rs`
+- Test: `safa-core/tests/test_slime.rs`
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1139,12 +1139,12 @@ fn test_agent_registry_independent_capacity() {
 - [ ] **Step 2: Run test to verify it fails**
 
 ```bash
-cargo test -p ama-core test_agent_registry_independent_capacity
+cargo test -p safa-core test_agent_registry_independent_capacity
 ```
 
 - [ ] **Step 3: Implement AgentRegistry**
 
-In `ama-core/src/slime.rs`:
+In `safa-core/src/slime.rs`:
 
 ```rust
 use crate::config::{AgentConfig, DomainPolicy};
@@ -1191,21 +1191,21 @@ impl AgentRegistry {
 - [ ] **Step 4: Run test to verify it passes**
 
 ```bash
-cargo test -p ama-core test_agent_registry_independent_capacity
+cargo test -p safa-core test_agent_registry_independent_capacity
 ```
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add ama-core/src/slime.rs ama-core/tests/test_slime.rs
+git add safa-core/src/slime.rs safa-core/tests/test_slime.rs
 git commit -m "feat(p2): add AgentRegistry with per-agent P0Authorizer instances"
 ```
 
 ### Task 11: Update pipeline to accept trait object
 
 **Files:**
-- Modify: `ama-core/src/pipeline.rs`
-- Test: `ama-core/tests/test_pipeline.rs`
+- Modify: `safa-core/src/pipeline.rs`
+- Test: `safa-core/tests/test_pipeline.rs`
 
 - [ ] **Step 1: Change process_action signature**
 
@@ -1232,7 +1232,7 @@ This should pass immediately since `P0Authorizer` implements `SlimeAuthorizer`.
 - [ ] **Step 3: Commit**
 
 ```bash
-git add ama-core/src/pipeline.rs
+git add safa-core/src/pipeline.rs
 git commit -m "refactor(p2): pipeline accepts &dyn SlimeAuthorizer for agent polymorphism"
 ```
 
@@ -1245,12 +1245,12 @@ Add `X-Agent-Id` header extraction in the HTTP layer. Route each request to the 
 ### Task 12: Add per-agent rate limiter
 
 **Files:**
-- Modify: `ama-daemon/src/server.rs`
-- Test: `ama-daemon/tests/p2_rate_limit.rs`
+- Modify: `safa-daemon/src/server.rs`
+- Test: `safa-daemon/tests/p2_rate_limit.rs`
 
 - [ ] **Step 1: Write the failing test**
 
-Create `ama-daemon/tests/p2_rate_limit.rs`:
+Create `safa-daemon/tests/p2_rate_limit.rs`:
 
 ```rust
 //! P2 per-agent rate limiting tests.
@@ -1311,7 +1311,7 @@ async fn test_per_agent_rate_limits_are_independent() {
 - [ ] **Step 2: Run test to verify it fails**
 
 ```bash
-cargo test -p ama-daemon test_per_agent_rate_limits_are_independent --features test-utils
+cargo test -p safa-daemon test_per_agent_rate_limits_are_independent --features test-utils
 ```
 
 - [ ] **Step 3: Implement per-agent rate limiter in AppState**
@@ -1476,25 +1476,25 @@ pub async fn test_server_multiagent(
 - [ ] **Step 5: Run test to verify it passes**
 
 ```bash
-cargo test -p ama-daemon test_per_agent_rate_limits_are_independent --features test-utils
+cargo test -p safa-daemon test_per_agent_rate_limits_are_independent --features test-utils
 ```
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add ama-daemon/src/server.rs ama-daemon/tests/p2_rate_limit.rs
+git add safa-daemon/src/server.rs safa-daemon/tests/p2_rate_limit.rs
 git commit -m "feat(p2): per-agent rate limiters with independent windows"
 ```
 
 ### Task 13: Extract X-Agent-Id header and route to agent
 
 **Files:**
-- Modify: `ama-daemon/src/server.rs`
-- Test: `ama-daemon/tests/p2_agent_routing.rs`
+- Modify: `safa-daemon/src/server.rs`
+- Test: `safa-daemon/tests/p2_agent_routing.rs`
 
 - [ ] **Step 1: Write the failing tests**
 
-Create `ama-daemon/tests/p2_agent_routing.rs`:
+Create `safa-daemon/tests/p2_agent_routing.rs`:
 
 ```rust
 use serde_json::json;
@@ -1608,12 +1608,12 @@ async fn test_valid_agent_id_routes_to_correct_budget() {
 - [ ] **Step 2: Run tests to verify they fail**
 
 ```bash
-cargo test -p ama-daemon p2_agent_routing --features test-utils
+cargo test -p safa-daemon p2_agent_routing --features test-utils
 ```
 
 - [ ] **Step 3: Implement X-Agent-Id extraction in handle_action**
 
-Update `handle_action` in `ama-daemon/src/server.rs`:
+Update `handle_action` in `safa-daemon/src/server.rs`:
 
 ```rust
 async fn handle_action(
@@ -1696,7 +1696,7 @@ fn resolve_agent_id(
 - [ ] **Step 4: Run tests to verify they pass**
 
 ```bash
-cargo test -p ama-daemon p2_agent_routing --features test-utils
+cargo test -p safa-daemon p2_agent_routing --features test-utils
 ```
 
 - [ ] **Step 5: Run all existing tests to verify no regressions**
@@ -1708,14 +1708,14 @@ cargo test --workspace --features test-utils
 - [ ] **Step 6: Commit**
 
 ```bash
-git add ama-daemon/src/server.rs ama-daemon/tests/p2_agent_routing.rs
+git add safa-daemon/src/server.rs safa-daemon/tests/p2_agent_routing.rs
 git commit -m "feat(p2): X-Agent-Id header routing with per-agent capacity isolation"
 ```
 
 ### Task 14: Update /ama/status endpoint for multi-agent
 
 **Files:**
-- Modify: `ama-daemon/src/server.rs`
+- Modify: `safa-daemon/src/server.rs`
 
 - [ ] **Step 1: Update handle_status to show per-agent capacity**
 
@@ -1762,14 +1762,14 @@ cargo test --workspace --features test-utils
 - [ ] **Step 3: Commit**
 
 ```bash
-git add ama-daemon/src/server.rs
+git add safa-daemon/src/server.rs
 git commit -m "feat(p2): /ama/status shows per-agent capacity breakdown"
 ```
 
 ### Task 15: Update existing test_server helper for backward compat
 
 **Files:**
-- Modify: `ama-daemon/src/server.rs`
+- Modify: `safa-daemon/src/server.rs`
 
 - [ ] **Step 1: Update test_server() to use single-agent mode**
 
@@ -1796,7 +1796,7 @@ All existing P1 tests should pass without modifications because they don't send 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add ama-daemon/src/server.rs
+git add safa-daemon/src/server.rs
 git commit -m "refactor(p2): update test helpers for backward compat with single-agent default"
 ```
 
@@ -1809,7 +1809,7 @@ Comprehensive tests for multi-agent edge cases and cross-agent isolation.
 ### Task 16: Cross-agent isolation adversarial tests
 
 **Files:**
-- Create: `ama-daemon/tests/p2_adversarial.rs`
+- Create: `safa-daemon/tests/p2_adversarial.rs`
 
 - [ ] **Step 1: Write adversarial tests**
 
@@ -1921,13 +1921,13 @@ async fn test_agent_id_injection_rejected() {
 - [ ] **Step 2: Run adversarial tests**
 
 ```bash
-cargo test -p ama-daemon p2_adversarial --features test-utils
+cargo test -p safa-daemon p2_adversarial --features test-utils
 ```
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add ama-daemon/tests/p2_adversarial.rs
+git add safa-daemon/tests/p2_adversarial.rs
 git commit -m "test(p2): adversarial tests for cross-agent isolation and global idempotency"
 ```
 
@@ -1948,13 +1948,13 @@ cargo clippy --workspace --features test-utils -- -D warnings
 - [ ] **Step 3: Verify binary runs**
 
 ```bash
-cd ama-daemon && cargo run -- --help 2>&1 || true
+cd safa-daemon && cargo run -- --help 2>&1 || true
 cargo build --workspace --release
 ```
 
 - [ ] **Step 4: Update version**
 
-In both `ama-core/Cargo.toml` and `ama-daemon/Cargo.toml`:
+In both `safa-core/Cargo.toml` and `safa-daemon/Cargo.toml`:
 
 ```toml
 version = "0.2.0-p2-held"
@@ -1964,9 +1964,9 @@ version = "0.2.0-p2-held"
 
 ```bash
 git add -A
-git commit -m "feat(p2): AMA P2 complete — multi-agent capacity system with per-agent budgets
+git commit -m "feat(p2): SAFA P2 complete — multi-agent capacity system with per-agent budgets
 
-- Workspace split: ama-core (pure library) + ama-daemon (HTTP wrapper)
+- Workspace split: safa-core (pure library) + safa-daemon (HTTP wrapper)
 - Per-agent capacity configs from config/agents/*.toml
 - X-Agent-Id header for agent context selection
 - Per-agent rate limiters (independent windows)
@@ -1985,34 +1985,34 @@ git commit -m "feat(p2): AMA P2 complete — multi-agent capacity system with pe
 | File | Purpose |
 |------|---------|
 | `Cargo.toml` (workspace root) | Workspace manifest |
-| `ama-core/Cargo.toml` | Core library crate manifest |
-| `ama-core/src/lib.rs` | Core library module declarations |
-| `ama-daemon/Cargo.toml` | HTTP daemon crate manifest |
-| `ama-daemon/src/error_response.rs` | AmaError → HTTP response conversion (orphan-safe) |
-| `ama-daemon/src/lib.rs` | Daemon library module declarations |
+| `safa-core/Cargo.toml` | Core library crate manifest |
+| `safa-core/src/lib.rs` | Core library module declarations |
+| `safa-daemon/Cargo.toml` | HTTP daemon crate manifest |
+| `safa-daemon/src/error_response.rs` | AmaError → HTTP response conversion (orphan-safe) |
+| `safa-daemon/src/lib.rs` | Daemon library module declarations |
 | `config/agents/default.toml` | Default agent capacity config |
-| `ama-daemon/tests/p2_rate_limit.rs` | Per-agent rate limit tests |
-| `ama-daemon/tests/p2_agent_routing.rs` | X-Agent-Id routing tests |
-| `ama-daemon/tests/p2_adversarial.rs` | Cross-agent adversarial tests |
+| `safa-daemon/tests/p2_rate_limit.rs` | Per-agent rate limit tests |
+| `safa-daemon/tests/p2_agent_routing.rs` | X-Agent-Id routing tests |
+| `safa-daemon/tests/p2_adversarial.rs` | Cross-agent adversarial tests |
 
 ### Modified Files
 | File | Changes |
 |------|---------|
-| `ama-core/src/config.rs` | +AgentConfig, +load_agent_configs(), agents field in AmaConfig, agents_hash in BootHashes |
-| `ama-core/src/slime.rs` | Remove DomainPolicy (use config::), +AgentRegistry |
-| `ama-core/src/pipeline.rs` | process_action takes `&dyn SlimeAuthorizer` |
-| `ama-daemon/src/server.rs` | AppState gets AgentRegistry, per-agent rate limiters, X-Agent-Id routing, updated /ama/status |
-| `ama-daemon/src/main.rs` | Updated imports for ama-core |
+| `safa-core/src/config.rs` | +AgentConfig, +load_agent_configs(), agents field in AmaConfig, agents_hash in BootHashes |
+| `safa-core/src/slime.rs` | Remove DomainPolicy (use config::), +AgentRegistry |
+| `safa-core/src/pipeline.rs` | process_action takes `&dyn SlimeAuthorizer` |
+| `safa-daemon/src/server.rs` | AppState gets AgentRegistry, per-agent rate limiters, X-Agent-Id routing, updated /ama/status |
+| `safa-daemon/src/main.rs` | Updated imports for safa-core |
 | `config/config.toml` | Removed [slime.domains] (moved to agents/) |
 
-### Moved Files (src/ → ama-core/src/ or ama-daemon/src/)
-All 12 source modules + actuator directory moved to ama-core. server.rs + main.rs moved to ama-daemon. All 17 test files split between ama-core/tests/ (11 unit) and ama-daemon/tests/ (6 integration).
+### Moved Files (src/ → safa-core/src/ or safa-daemon/src/)
+All 12 source modules + actuator directory moved to safa-core. server.rs + main.rs moved to safa-daemon. All 17 test files split between safa-core/tests/ (11 unit) and safa-daemon/tests/ (6 integration).
 
 ### Deleted Files
 | File | Reason |
 |------|--------|
-| `src/` (old root) | Replaced by ama-core/src/ and ama-daemon/src/ |
-| `tests/` (old root) | Split into ama-core/tests/ and ama-daemon/tests/ |
+| `src/` (old root) | Replaced by safa-core/src/ and safa-daemon/src/ |
+| `tests/` (old root) | Split into safa-core/tests/ and safa-daemon/tests/ |
 
 ---
 

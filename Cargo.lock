@@ -12,44 +12,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ama-core"
-version = "0.2.0-p2-held"
-dependencies = [
- "bytes",
- "dashmap",
- "libc",
- "reqwest",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
- "thiserror",
- "tokio",
- "toml",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "ama-daemon"
-version = "0.2.0-p2-held"
-dependencies = [
- "ama-core",
- "axum",
- "axum-test",
- "bytes",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tower",
- "tower-http",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
 name = "anyhow"
 version = "1.0.102"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1207,6 +1169,44 @@ name = "ryu"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
+
+[[package]]
+name = "safa-core"
+version = "0.2.0-p2-held"
+dependencies = [
+ "bytes",
+ "dashmap",
+ "libc",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "toml",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "safa-daemon"
+version = "0.2.0-p2-held"
+dependencies = [
+ "axum",
+ "axum-test",
+ "bytes",
+ "safa-core",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tower",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
 
 [[package]]
 name = "scopeguard"

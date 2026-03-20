@@ -1,5 +1,5 @@
 [meta]
-schema_version = "ama-intents-v1"
+schema_version = "safa-intents-v1"
 
 [intents.list_dir]
 binary = "/bin/ls"

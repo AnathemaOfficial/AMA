@@ -1,6 +1,6 @@
-# AMA Capacity Model
+# SAFA Capacity Model
 
-AMA enforces two independent layers of capacity control on every agent. These layers
+SAFA enforces two independent layers of capacity control on every agent. These layers
 serve different purposes and operate on different timescales.
 
 ## Layer 1 — Monotonic Capacity (Thermodynamic Law)
@@ -8,7 +8,7 @@ serve different purposes and operate on different timescales.
 **What:** A per-agent budget counter that only ever increases. Once capacity is consumed,
 it is gone forever (within the current process lifetime).
 
-**Mechanism:** `AtomicU64` compare-and-swap loop in `P0Authorizer` (ama-core/src/slime.rs).
+**Mechanism:** `AtomicU64` compare-and-swap loop in `P0Authorizer` (safa-core/src/slime.rs).
 
 **Properties:**
 - Capacity starts at 0, increases toward `max_capacity` with each action
@@ -40,7 +40,7 @@ Agent "developer" (max_capacity = 10000)
 **What:** A per-agent sliding window counter that limits requests per time period.
 Unlike Layer 1, this resets periodically.
 
-**Mechanism:** `Mutex<RateLimitState>` per agent in `AppState` (ama-daemon/src/server.rs).
+**Mechanism:** `Mutex<RateLimitState>` per agent in `AppState` (safa-daemon/src/server.rs).
 
 **Properties:**
 - Configured via `rate_limit_per_window` and `rate_limit_window_secs` per agent

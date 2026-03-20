@@ -1,12 +1,12 @@
-# AMA Threat Model
+# SAFA Threat Model
 
 > Extracted from the P0 Design Specification, Section 7.
 
 ## Trust Boundary
 
-AMA assumes a **single-host local trust boundary**.
+SAFA assumes a **single-host local trust boundary**.
 
-- **Trusted:** AMA binary, embedded AB-S, configuration files (SHA-256 hashed at boot)
+- **Trusted:** SAFA binary, embedded AB-S, configuration files (SHA-256 hashed at boot)
 - **Untrusted:** All incoming HTTP requests (regardless of local origin), actuation targets (filesystem, network responses, process outputs)
 - **Out of scope:** Host OS compromise (root attacker), physical access
 
@@ -37,7 +37,7 @@ AMA assumes a **single-host local trust boundary**.
 | Threat | Why Not Covered | Future Mitigation |
 |--------|----------------|-------------------|
 | Compromised Host | Cannot defend against root/kernel attacks | seccomp, namespaces |
-| Semantic Malice | AMA validates form, not content. Writing valid but malicious content is permitted by design. | Agent responsibility |
+| Semantic Malice | SAFA validates form, not content. Writing valid but malicious content is permitted by design. | Agent responsibility |
 | Config Tampering | TOML modified before boot → bad laws loaded | P0+: SHA-256 logged at boot. P1: signatures. |
 | Timing Side-Channels | Response times vary by action type | Constant-time padding |
 | Restart Loop | Forced restarts reset capacity | Detection via `session_id`. OS-level limits (systemd). |

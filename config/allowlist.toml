@@ -1,5 +1,5 @@
 [meta]
-schema_version = "ama-allowlist-v1"
+schema_version = "safa-allowlist-v1"
 
 [[urls]]
 pattern = "https://api.weather.com/*"

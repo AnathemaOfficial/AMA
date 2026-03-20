@@ -1,6 +1,6 @@
-# AMA Examples
+# SAFA Examples
 
-Example requests for the AMA action endpoint.
+Example requests for the SAFA action endpoint.
 
 ## Usage
 

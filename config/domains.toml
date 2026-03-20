@@ -1,5 +1,5 @@
 [meta]
-schema_version = "ama-domains-v1"
+schema_version = "safa-domains-v1"
 max_magnitude_claim = 1000
 
 [domains.file_write]

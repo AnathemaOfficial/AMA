@@ -1,4 +1,4 @@
-# AMA — Known Issues
+# SAFA — Known Issues
 
 > Updated 2026-03-14 after P1 completion.
 > C2 and C3 were resolved in P1. C1 and I1–I6 remain open for P2+.

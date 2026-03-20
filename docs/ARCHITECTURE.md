@@ -1,10 +1,10 @@
-# AMA Architecture
+# SAFA Architecture
 
-> Agent Machine Armor — universal law-adapter membrane for AI agents.
+> SLIME Adapter for Agents — universal law-adapter membrane for AI agents.
 
 ## Overview
 
-AMA sits between AI agents and real-world actuation surfaces. It translates agent
+SAFA sits between AI agents and real-world actuation surfaces. It translates agent
 intentions into canonical actions, validates them through embedded SLIME/AB-S, and
 permits actuation only after binary authorization.
 
@@ -13,14 +13,14 @@ Agent (OpenClaw, LangChain, etc.)
   │
   │  X-Agent-Id: openclaw
   ▼
-┌──────────────────── ama-daemon ─────────────────────┐
+┌──────────────────── safa-daemon ─────────────────────┐
 │  HTTP transport layer (axum 0.8)                    │
 │  - X-Agent-Id resolution (context selector)         │
 │  - Per-agent rate limiting                          │
 │  - Body size limits, timeouts, admission control    │
 │  - Idempotency key validation                       │
 │                                                     │
-│  ┌──────────────── ama-core ──────────────────┐     │
+│  ┌──────────────── safa-core ──────────────────┐     │
 │  │  Decision law engine (zero HTTP dependency) │     │
 │  │                                             │     │
 │  │  POST /ama/action                           │     │
@@ -44,19 +44,19 @@ Real World (filesystem, processes, HTTPS)
 
 ## Workspace Layout
 
-AMA is a Cargo workspace with two crates that enforce a strict separation:
+SAFA is a Cargo workspace with two crates that enforce a strict separation:
 
-- **ama-core** contains the decision law — all validation, canonicalization, mapping,
+- **safa-core** contains the decision law — all validation, canonicalization, mapping,
   authorization, and actuation logic. It has **zero HTTP dependencies**. If you can
   express it as a pure function of `(request, config, authorizer) → result`, it belongs
-  in ama-core.
+  in safa-core.
 
-- **ama-daemon** handles HTTP transport only — axum routing, middleware (rate limiting,
+- **safa-daemon** handles HTTP transport only — axum routing, middleware (rate limiting,
   timeouts, body limits, admission control), `X-Agent-Id` header resolution, and
-  serialization of `AmaError` into HTTP responses. It depends on ama-core as a library.
+  serialization of `AmaError` into HTTP responses. It depends on safa-core as a library.
 
 ```
-ama-core/src/
+safa-core/src/
 ├── lib.rs           Crate root, module declarations
 ├── config.rs        TOML loading, AgentConfig, SHA-256 boot hashing
 ├── errors.rs        Error types + http_status_and_body() (no axum)
@@ -74,7 +74,7 @@ ama-core/src/
     ├── shell.rs     execv direct, setpgid, kill sequence
     └── http.rs      HTTPS-only, allowlist, SSRF protection
 
-ama-daemon/src/
+safa-daemon/src/
 ├── main.rs          Entry point, boot integrity, server start
 ├── lib.rs           Crate root
 └── server.rs        axum router, AppState, middleware, X-Agent-Id routing
@@ -117,7 +117,7 @@ agent's capacity budget and rate limiter.
 
 **Important:** `X-Agent-Id` is NOT authentication. It does not verify identity or
 bind a caller to a runtime. Any client that knows a valid agent_id can select it.
-In P2, this is acceptable because AMA runs on `127.0.0.1` (localhost only).
+In P2, this is acceptable because SAFA runs on `127.0.0.1` (localhost only).
 
 Behavior:
 - **Header present + valid** → route to that agent's authorizer
@@ -130,7 +130,7 @@ against a capability token or Machine-Suit admission credential.
 
 ## Capacity Model
 
-AMA enforces two independent layers of capacity control. See
+SAFA enforces two independent layers of capacity control. See
 [`docs/CAPACITY_MODEL.md`](CAPACITY_MODEL.md) for full details.
 
 | Layer | Mechanism | Scope | Resets? |
@@ -195,7 +195,7 @@ be reused by another.
 
 - [P0 Design Specification](superpowers/specs/2026-03-13-ama-p0-design.md)
 - [Capacity Model](CAPACITY_MODEL.md)
-- [P1 HELD Summary](p1/AMA_P1_HELD.md)
+- [P1 HELD Summary](p1/SAFA_P1_HELD.md)
 - [Known Issues](KNOWN_ISSUES_P1.md)
-- [Concurrency Model](p1/AMA_CONCURRENCY_MODEL.md)
-- [Idempotency State Machine](p1/AMA_IDEMPOTENCY_STATE_MACHINE.md)
+- [Concurrency Model](p1/SAFA_CONCURRENCY_MODEL.md)
+- [Idempotency State Machine](p1/SAFA_IDEMPOTENCY_STATE_MACHINE.md)

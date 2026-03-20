@@ -1,3 +1,3 @@
 [workspace]
-members = ["ama-core", "ama-daemon"]
+members = ["safa-core", "safa-daemon"]
 resolver = "2"

@@ -1,0 +1,184 @@
+use crate::errors::AmaError;
+use crate::newtypes::{AllowlistedUrl, AllowlistEntry, BoundedBytes, HttpMethod};
+use bytes::Bytes;
+use reqwest::redirect::Policy;
+use std::net::IpAddr;
+use std::time::Duration;
+
+const MAX_RESPONSE_BYTES: usize = 262_144; // 256 KiB
+const MAX_REDIRECTS: usize = 3;
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+const TOTAL_TIMEOUT: Duration = Duration::from_secs(15);
+const USER_AGENT: &str = "SAFA/0.1.0";
+
+/// Result of an HTTP request.
+#[derive(Debug)]
+pub struct HttpResult {
+    pub status_code: u16,
+    pub body: String,
+    pub truncated: bool,
+}
+
+/// Check if an IP address is private/loopback/link-local/metadata.
+pub fn is_private_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            v4.is_loopback()           // 127.0.0.0/8
+            || v4.is_private()         // 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
+            || v4.is_link_local()      // 169.254.0.0/16 (includes metadata 169.254.169.254)
+            || v4.is_broadcast()
+            || v4.is_unspecified()
+            || v4.octets()[0] == 0     // 0.0.0.0/8
+        }
+        IpAddr::V6(v6) => {
+            v6.is_loopback()           // ::1
+            || v6.is_unspecified()     // ::
+            // IPv4-mapped IPv6 addresses
+            || v6.to_ipv4_mapped().is_some_and(|v4| {
+                v4.is_loopback() || v4.is_private() || v4.is_link_local()
+            })
+        }
+    }
+}
+
+/// Resolve hostname and validate all IPs are safe (not private/loopback).
+async fn validate_dns(host: &str) -> Result<(), AmaError> {
+    use tokio::net::lookup_host;
+
+    let addrs: Vec<_> = lookup_host(format!("{}:443", host))
+        .await
+        .map_err(|e| AmaError::ServiceUnavailable {
+            message: format!("DNS resolution failed: {}", e),
+        })?
+        .collect();
+
+    if addrs.is_empty() {
+        return Err(AmaError::ServiceUnavailable {
+            message: "DNS resolved to no addresses".into(),
+        });
+    }
+
+    for addr in &addrs {
+        if is_private_ip(addr.ip()) {
+            return Err(AmaError::Validation {
+                error_class: "invalid_target".into(),
+                message: format!("URL resolves to private/loopback IP: {}", addr.ip()),
+            });
+        }
+    }
+
+    Ok(())
+}
+
+/// Execute an HTTP request with full safety checks.
+pub async fn http_request(
+    method: HttpMethod,
+    url: &AllowlistedUrl,
+    body: Option<&BoundedBytes>,
+    allowlist: &[AllowlistEntry],
+) -> Result<HttpResult, AmaError> {
+    let url_str = url.as_str();
+
+    // Extract host for DNS validation
+    let parsed = reqwest::Url::parse(url_str).map_err(|e| AmaError::Validation {
+        error_class: "invalid_target".into(),
+        message: format!("invalid URL: {}", e),
+    })?;
+    let host = parsed.host_str().ok_or_else(|| AmaError::Validation {
+        error_class: "invalid_target".into(),
+        message: "URL has no host".into(),
+    })?;
+
+    // DNS/IP safety check — resolve and validate before connecting
+    validate_dns(host).await?;
+
+    // Build reqwest client with safety constraints
+    let client = reqwest::Client::builder()
+        .user_agent(USER_AGENT)
+        .connect_timeout(CONNECT_TIMEOUT)
+        .timeout(TOTAL_TIMEOUT)
+        .redirect(Policy::limited(MAX_REDIRECTS))
+        .https_only(true)              // HTTPS only
+        .danger_accept_invalid_certs(false) // TLS validation ON
+        .build()
+        .map_err(|e| AmaError::ServiceUnavailable {
+            message: format!("HTTP client build failed: {}", e),
+        })?;
+
+    // Build request
+    let request = match method {
+        HttpMethod::Get => client.get(url_str),
+        HttpMethod::Post => {
+            let mut req = client.post(url_str);
+            if let Some(body_data) = body {
+                req = req.body(body_data.as_str().to_string())
+                    .header("Content-Type", "application/json");
+            }
+            req
+        }
+    };
+
+    // Execute
+    let response: reqwest::Response = request.send().await.map_err(|e| {
+        if e.is_redirect() {
+            AmaError::Validation {
+                error_class: "redirect_error".into(),
+                message: "redirect limit exceeded or POST redirect rejected".into(),
+            }
+        } else if e.is_timeout() {
+            AmaError::ServiceUnavailable {
+                message: "HTTP request timed out".into(),
+            }
+        } else {
+            AmaError::ServiceUnavailable {
+                message: format!("HTTP request failed: {}", e),
+            }
+        }
+    })?;
+
+    // Re-validate the actual remote IP after connection (DNS rebinding protection)
+    if let Some(remote_addr) = response.remote_addr() {
+        let ip = remote_addr.ip();
+        if is_private_ip(ip) {
+            return Err(AmaError::Validation {
+                error_class: "invalid_target".into(),
+                message: format!("response came from private IP: {}", ip),
+            });
+        }
+    }
+
+    // Validate final URL against allowlist (after redirects)
+    let final_url = response.url().as_str();
+    if final_url != url_str {
+        // Re-check allowlist for redirect target
+        let _ = AllowlistedUrl::new(final_url, allowlist).map_err(|_| AmaError::Validation {
+            error_class: "redirect_error".into(),
+            message: "redirect target not in allowlist".into(),
+        })?;
+    }
+
+    let status_code = response.status().as_u16();
+
+    // Bounded body read (256 KiB max)
+    let body_bytes: Bytes = response.bytes().await.map_err(|e| AmaError::ServiceUnavailable {
+        message: format!("failed to read response body: {}", e),
+    })?;
+
+    let truncated = body_bytes.len() > MAX_RESPONSE_BYTES;
+    let read_bytes = if truncated {
+        &body_bytes[..MAX_RESPONSE_BYTES]
+    } else {
+        &body_bytes[..]
+    };
+
+    // UTF-8 check (P0 text-only)
+    let body_text = String::from_utf8(read_bytes.to_vec()).map_err(|_| AmaError::ServiceUnavailable {
+        message: "response body is not valid UTF-8 (P0 is text-only)".into(),
+    })?;
+
+    Ok(HttpResult {
+        status_code,
+        body: body_text,
+        truncated,
+    })
+}

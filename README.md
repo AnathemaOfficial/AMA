@@ -14,13 +14,14 @@ Agent → SAFA → SLIME/AB-S → Real world actuation
 
 ## Status
 
-**SAFA P2 — HELD** (Multi-Agent Capacity System)
+**SAFA P3 — HELD** (Agent Containment)
 
 - **P0** validated the full pipeline: **validate → map → authorize → actuate**
 - **P1** hardened for concurrent use: idempotency races (C2), rate limiter races (C3), bounded admission, execution timeouts
 - **P2** introduced multi-agent capacity: workspace split, per-agent budgets, `X-Agent-Id` routing, per-agent rate limiters
-- **120 tests**, clippy clean (`-D warnings`)
-- Tags: `v0.1.0-p0-held`, `v0.1.0-p1-held`, `v0.2.0-p2-held`
+- **P3** sealed agent containment: HMAC identity binding, capability manifests with Proof-of-Constraint, per-agent workspace isolation with symlink detection (C1 fix)
+- **135+ tests**, clippy clean (`-D warnings`)
+- Tags: `v0.1.0-p0-held`, `v0.1.0-p1-held`, `v0.2.0-p2-held`, `v0.3.0-p3-held`
 
 Known issues documented in [`docs/KNOWN_ISSUES_P1.md`](docs/KNOWN_ISSUES_P1.md).
 
@@ -37,21 +38,28 @@ SAFA is a Cargo workspace with two crates:
 Agent (OpenClaw, LangChain, etc.)
   │
   │  POST /ama/action
-  │  X-Agent-Id: openclaw        ← context selector (NOT auth)
+  │  X-Agent-Id: openclaw
+  │  X-Agent-Timestamp: <epoch>      ← P3: HMAC identity
+  │  X-Agent-Signature: <hmac-hex>   ← P3: HMAC identity
   │  Idempotency-Key: <uuid>
   │
   ▼
 ┌──────────────────── safa-daemon ─────────────────────┐
-│  resolve_agent_id() → per-agent rate limit check    │
+│  0. resolve_agent_id()                              │
+│  0.5 P3: verify_identity() — HMAC-SHA256 check      │
+│  1. per-agent rate limit check                      │
 │                                                     │
 │  ┌──────────────── safa-core ──────────────────┐     │
-│  │  1. Validate     magnitude, field exclusivity│    │
-│  │  2. Canonicalize  → CanonicalAction (newtypes)│   │
-│  │  3. Map           → domain_id (domains.toml) │   │
-│  │  4. Authorize     → SLIME (per-agent budget) │   │
-│  │  5. Actuate       → file/shell/HTTP          │   │
+│  │  2. Validate     magnitude, field exclusivity│    │
+│  │  3. Canonicalize  → CanonicalAction (newtypes)│   │
+│  │     P3: per-agent workspace isolation         │   │
+│  │     P3: canonicalize() symlink detection      │   │
+│  │  4. Map           → domain_id (domains.toml) │   │
+│  │  5. Authorize     → SLIME (per-agent budget) │   │
+│  │  6. Actuate       → file/shell/HTTP          │   │
 │  └──────────────────────────────────────────────┘   │
 │                                                     │
+│  Response: X-Safa-Policy-Hash (Proof-of-Constraint) │
 │  Audit: structured tracing + SHA-256 request hash   │
 └─────────────────────────────────────────────────────┘
 ```
@@ -85,10 +93,11 @@ cargo build --workspace --release
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/ama/health` | Liveness check |
-| GET | `/ama/version` | Version info |
+| GET | `/health` | Liveness check |
+| GET | `/version` | Version info |
 | GET | `/ama/status` | Per-agent capacity + domain stats |
-| POST | `/ama/action` | Execute action (`Idempotency-Key` + optional `X-Agent-Id` headers) |
+| GET | `/ama/manifest/{agent_id}` | P3: Agent capability manifest + policy hash |
+| POST | `/ama/action` | Execute action (returns `X-Safa-Policy-Hash` header) |
 
 ## Quick Example
 
@@ -112,7 +121,7 @@ See [`examples/`](examples/) for more.
 ## Tests
 
 ```bash
-cargo test --workspace --features test-utils    # 120 tests
+cargo test --workspace --features test-utils    # 135+ tests
 cargo clippy --workspace --features test-utils -- -D warnings
 ```
 

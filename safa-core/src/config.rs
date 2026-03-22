@@ -73,6 +73,11 @@ struct RawAgent {
     rate_limit_per_window: u64,
     #[serde(default = "default_rate_limit_window_secs")]
     rate_limit_window_secs: u64,
+    /// P3: HMAC shared secret for identity binding. Optional for backward
+    /// compatibility — if absent, identity verification is skipped for this
+    /// agent (localhost-only acceptable in P2 mode).
+    #[serde(default)]
+    secret: Option<String>,
     #[serde(default)]
     domains: HashMap<String, RawDomainPolicy>,
 }
@@ -175,6 +180,10 @@ pub struct AgentConfig {
     pub rate_limit_per_window: u64,
     pub rate_limit_window_secs: u64,
     pub domain_policies: HashMap<String, DomainPolicy>,
+    /// P3: HMAC shared secret for identity binding.
+    /// When Some, all requests for this agent MUST include valid HMAC headers.
+    /// When None, identity verification is skipped (P2 backward compat).
+    pub secret: Option<String>,
 }
 
 impl AgentConfig {
@@ -245,12 +254,27 @@ impl AgentConfig {
             });
         }
 
+        // P3: Validate secret if present (must be non-empty hex-compatible)
+        if let Some(ref s) = agent.secret {
+            if s.is_empty() {
+                return Err(AmaError::ServiceUnavailable {
+                    message: format!("agent '{}': secret must not be empty if specified", agent.agent_id),
+                });
+            }
+            if s.len() < 32 {
+                return Err(AmaError::ServiceUnavailable {
+                    message: format!("agent '{}': secret must be at least 32 characters", agent.agent_id),
+                });
+            }
+        }
+
         Ok(Self {
             agent_id: agent.agent_id,
             max_capacity: agent.max_capacity,
             rate_limit_per_window: agent.rate_limit_per_window,
             rate_limit_window_secs: agent.rate_limit_window_secs,
             domain_policies,
+            secret: agent.secret,
         })
     }
 }
@@ -474,6 +498,7 @@ impl AmaConfig {
                     rate_limit_per_window: 60,
                     rate_limit_window_secs: 60,
                     domain_policies: domain_policies.clone(),
+                    secret: None, // P2 backward compat: no identity binding
                 };
 
                 let mut agents = HashMap::new();

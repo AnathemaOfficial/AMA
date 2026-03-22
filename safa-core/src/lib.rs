@@ -8,4 +8,6 @@ pub mod mapper;
 pub mod actuator;
 pub mod idempotency;
 pub mod audit;
+pub mod identity;
+pub mod manifest;
 pub mod pipeline;

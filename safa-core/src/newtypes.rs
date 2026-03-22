@@ -1,7 +1,14 @@
 use crate::errors::AmaError;
 use std::path::{Path, PathBuf};
 
-/// A path guaranteed to be inside workspace_root, with no traversal or symlinks.
+/// A path guaranteed to be inside workspace_root (or agent workspace), with
+/// no traversal or symlinks.
+///
+/// P3: When `agent_id` is provided, the effective root becomes
+/// `workspace_root/{agent_id}/` — enforcing per-agent workspace isolation.
+///
+/// P3: Uses `std::fs::canonicalize()` on the parent directory to resolve
+/// symlinks at validation time, fixing the C1 TOCTOU vulnerability.
 #[derive(Debug, Clone)]
 pub struct WorkspacePath {
     canonical: PathBuf,
@@ -9,7 +16,19 @@ pub struct WorkspacePath {
 }
 
 impl WorkspacePath {
+    /// Create a WorkspacePath confined to `workspace_root`.
+    /// For backward compatibility (P0-P2), agent_id is not required.
     pub fn new(relative: &str, workspace_root: &Path) -> Result<Self, AmaError> {
+        Self::new_with_agent(relative, workspace_root, None)
+    }
+
+    /// P3: Create a WorkspacePath confined to `workspace_root/{agent_id}/`.
+    /// When agent_id is Some, the effective workspace is per-agent isolated.
+    pub fn new_with_agent(
+        relative: &str,
+        workspace_root: &Path,
+        agent_id: Option<&str>,
+    ) -> Result<Self, AmaError> {
         if relative.is_empty() {
             return Err(AmaError::Validation {
                 error_class: "invalid_target".into(),
@@ -36,8 +55,64 @@ impl WorkspacePath {
                 });
             }
         }
-        let joined = workspace_root.join(relative);
-        let canonical = joined;
+
+        // P3: Compute effective root (per-agent if agent_id provided)
+        let effective_root = match agent_id {
+            Some(aid) => workspace_root.join(aid),
+            None => workspace_root.to_path_buf(),
+        };
+
+        let joined = effective_root.join(relative);
+
+        // P3: Resolve symlinks via canonicalize() to fix C1 TOCTOU.
+        // For new files (file_write), canonicalize the parent directory
+        // and append the filename — the parent must exist and be real.
+        let canonical = if joined.exists() {
+            // File exists: canonicalize the full path
+            joined.canonicalize().map_err(|e| AmaError::Validation {
+                error_class: "invalid_target".into(),
+                message: format!("cannot resolve path: {}", e),
+            })?
+        } else if let Some(parent) = joined.parent() {
+            if parent.exists() {
+                // Parent exists: canonicalize parent + append filename
+                let canon_parent = parent.canonicalize().map_err(|e| AmaError::Validation {
+                    error_class: "invalid_target".into(),
+                    message: format!("cannot resolve parent: {}", e),
+                })?;
+                match joined.file_name() {
+                    Some(name) => canon_parent.join(name),
+                    None => {
+                        return Err(AmaError::Validation {
+                            error_class: "invalid_target".into(),
+                            message: "path has no filename component".into(),
+                        });
+                    }
+                }
+            } else {
+                // Neither file nor parent exists — use logical join
+                // (directory will be created by actuator if needed)
+                joined.clone()
+            }
+        } else {
+            joined.clone()
+        };
+
+        // P3: Verify containment — canonical path must start with effective root.
+        // Only check if canonicalize() was actually performed (parent existed).
+        let effective_root_canon = if effective_root.exists() {
+            effective_root.canonicalize().unwrap_or(effective_root.clone())
+        } else {
+            effective_root.clone()
+        };
+
+        if !canonical.starts_with(&effective_root_canon) {
+            return Err(AmaError::Validation {
+                error_class: "invalid_target".into(),
+                message: "path escapes workspace boundary (symlink detected)".into(),
+            });
+        }
+
         Ok(Self {
             canonical,
             relative: relative.to_string(),

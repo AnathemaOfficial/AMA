@@ -161,7 +161,7 @@ async fn test_success_replay_returns_identical_result() {
 /// Test 4 — InFlight response returns 409 Conflict (Policy A)
 ///
 /// When a duplicate key is submitted while execution is in progress,
-/// AMA must return a clear conflict response, not block.
+/// SAFA must return a clear conflict response, not block.
 #[tokio::test]
 async fn test_inflight_returns_conflict() {
     // This is hard to test at integration level because execution is fast.

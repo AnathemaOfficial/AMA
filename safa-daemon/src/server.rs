@@ -1,6 +1,9 @@
+use safa_core::audit::ProofStore;
 use safa_core::config::AmaConfig;
 use safa_core::errors::AmaError;
+use safa_core::identity;
 use safa_core::idempotency::{validate_idempotency_key, IdempotencyCache, IdempotencyStatus};
+use safa_core::manifest::PublicManifest;
 use safa_core::pipeline::process_action;
 use safa_core::schema::ActionRequest;
 use safa_core::slime::{AgentRegistry, SlimeAuthorizer};
@@ -49,6 +52,7 @@ pub struct AppState {
     pub start_time: Instant,
     pub domain_counters: HashMap<String, AtomicU64>,
     pub agent_rate_limiters: HashMap<String, std::sync::Mutex<RateLimitState>>,
+    pub proof_store: ProofStore,
 }
 
 impl AppState {
@@ -89,6 +93,7 @@ impl AppState {
             start_time: Instant::now(),
             domain_counters,
             agent_rate_limiters,
+            proof_store: ProofStore::new(10_000),
             config,
         })
     }
@@ -98,6 +103,8 @@ pub fn build_router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/ama/action", post(handle_action))
         .route("/ama/status", get(handle_status))
+        .route("/ama/manifest/{agent_id}", get(handle_manifest))
+        .route("/ama/proof/{request_id}", get(handle_proof))
         .route("/health", get(handle_health))
         .route("/version", get(handle_version))
         .layer(
@@ -245,6 +252,64 @@ async fn handle_status(
     }))
 }
 
+/// P3: Serve the public capability manifest for an agent.
+/// Returns the agent's capabilities, constraints, and manifest hash.
+/// Never exposes the HMAC secret.
+async fn handle_manifest(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Path(agent_id): axum::extract::Path<String>,
+) -> Response {
+    match state.config.agents.get(&agent_id) {
+        Some(agent_config) => {
+            let manifest = PublicManifest::from_agent_config(agent_config);
+            let hash = manifest.hash().to_string();
+            (
+                StatusCode::OK,
+                [("x-safa-policy-hash", hash)],
+                Json(serde_json::to_value(&manifest).unwrap()),
+            ).into_response()
+        }
+        None => {
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({
+                    "status": "error",
+                    "error_class": "unknown_agent",
+                    "message": format!("no manifest for agent: {}", agent_id),
+                })),
+            ).into_response()
+        }
+    }
+}
+
+/// P3: Proof-of-Constraint endpoint.
+/// Returns the verdict record for a past request, allowing any downstream
+/// product to verify that SAFA evaluated the action.
+async fn handle_proof(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Path(request_id): axum::extract::Path<String>,
+) -> Response {
+    match state.proof_store.get(&request_id) {
+        Some(record) => {
+            (
+                StatusCode::OK,
+                [("x-safa-policy-hash", record.manifest_hash.clone())],
+                Json(serde_json::to_value(&record).unwrap()),
+            ).into_response()
+        }
+        None => {
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({
+                    "status": "error",
+                    "error_class": "proof_not_found",
+                    "message": format!("no proof record for request_id: {}", request_id),
+                })),
+            ).into_response()
+        }
+    }
+}
+
 async fn handle_action(
     State(state): State<Arc<AppState>>,
     headers: axum::http::HeaderMap,
@@ -255,6 +320,39 @@ async fn handle_action(
         Ok(id) => id,
         Err(resp) => return resp,
     };
+
+    // 0.5 P3: Identity binding — verify HMAC if agent has a secret configured
+    if let Some(agent_config) = state.config.agents.get(&agent_id) {
+        if let Some(ref secret) = agent_config.secret {
+            let timestamp_str = headers.get("x-agent-timestamp")
+                .and_then(|v| v.to_str().ok());
+            let signature_hex = headers.get("x-agent-signature")
+                .and_then(|v| v.to_str().ok());
+
+            let now_secs = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+
+            if let Err(e) = identity::verify_identity(
+                secret,
+                &agent_id,
+                timestamp_str,
+                signature_hex,
+                &body,
+                now_secs,
+            ) {
+                return (
+                    StatusCode::FORBIDDEN,
+                    Json(json!({
+                        "status": "error",
+                        "error_class": "identity_verification_failed",
+                        "message": e.to_string(),
+                    })),
+                ).into_response();
+            }
+        }
+    }
 
     // 1. Per-agent rate limit
     if !check_rate_limit(&state, &agent_id) {
@@ -351,11 +449,35 @@ async fn handle_action(
         request,
         &state.config,
         authorizer,
-        action_id,
+        action_id.clone(),
         &state.session_id.to_string(),
+        Some(&agent_id),
     ).await;
 
     // 7. Build response and cache
+    //    P3: Include X-Safa-Policy-Hash header for Proof-of-Constraint
+    let policy_hash = state.config.agents.get(&agent_id)
+        .map(|ac| PublicManifest::from_agent_config(ac).hash().to_string())
+        .unwrap_or_default();
+
+    // P3: Store proof record for Proof-of-Constraint endpoint
+    let verdict_str = match &result {
+        Ok(_) => "AUTHORIZED",
+        Err(_) => "IMPOSSIBLE",
+    };
+    let timestamp_epoch = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    state.proof_store.insert(safa_core::audit::ProofRecord {
+        request_id: action_id.clone(),
+        agent_id: agent_id.clone(),
+        action: action_name.clone(),
+        verdict: verdict_str.to_string(),
+        manifest_hash: policy_hash.clone(),
+        timestamp: timestamp_epoch.to_string(),
+    });
+
     match result {
         Ok(response) => {
             let response_json = serde_json::to_string(&response).unwrap();
@@ -367,11 +489,19 @@ async fn handle_action(
             }
 
             state.idempotency_cache.complete(idem_key, response_json.clone());
-            (
+
+            let mut resp = (
                 StatusCode::OK,
                 [(header::CONTENT_TYPE, "application/json")],
                 response_json,
-            ).into_response()
+            ).into_response();
+            if !policy_hash.is_empty() {
+                resp.headers_mut().insert(
+                    "x-safa-policy-hash",
+                    policy_hash.parse().unwrap(),
+                );
+            }
+            resp
         }
         Err(e) => {
             // P1 Model A: commit error as terminal result, do not remove.
@@ -466,6 +596,7 @@ pub async fn test_server_multiagent(
             rate_limit_per_window: *rate_limit,
             rate_limit_window_secs: 60,
             domain_policies: base_domain_policies.clone(),
+            secret: None, // Test agents: no identity binding by default
         };
         if *capacity > global_max_capacity {
             global_max_capacity = *capacity;

@@ -6,6 +6,8 @@ agent_id = "readonly"
 max_capacity = 1000
 rate_limit_per_window = 10
 rate_limit_window_secs = 60
+# P3: HMAC shared secret for identity binding (min 32 chars)
+secret = "safa-readonly-agent-secret-key-2026-change-me"
 
 [agent.domains.fs_read_workspace]
 enabled = true

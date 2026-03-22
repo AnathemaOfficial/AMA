@@ -6,6 +6,8 @@ agent_id = "ci-bot"
 max_capacity = 20000
 rate_limit_per_window = 200
 rate_limit_window_secs = 300
+# P3: HMAC shared secret for identity binding (min 32 chars)
+secret = "safa-ci-bot-agent-secret-key-2026-change-me"
 
 [agent.domains.fs_write_workspace]
 enabled = true

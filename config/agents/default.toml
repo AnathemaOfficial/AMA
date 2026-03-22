@@ -3,6 +3,8 @@ agent_id = "default"
 max_capacity = 10000
 rate_limit_per_window = 60
 rate_limit_window_secs = 60
+# P3: HMAC shared secret for identity binding (min 32 chars)
+secret = "safa-default-agent-secret-key-2026-change-me"
 
 [agent.domains.fs_write_workspace]
 enabled = true

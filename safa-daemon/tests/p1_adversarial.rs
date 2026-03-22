@@ -1,6 +1,6 @@
 /// P1 Section 9 — Cross-Cutting Adversarial Tests
 ///
-/// These tests validate that AMA's hardened subsystems interact correctly
+/// These tests validate that SAFA's hardened subsystems interact correctly
 /// under combined stress. Each test exercises multiple workstreams simultaneously.
 ///
 /// Reference: docs/SAFA_P1_TASKLIST.md (Section 9)

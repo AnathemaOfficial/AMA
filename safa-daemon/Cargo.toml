@@ -1,6 +1,6 @@
 [package]
 name = "safa-daemon"
-version = "0.2.0-p2-held"
+version = "0.3.0-p3-held"
 edition = "2021"
 description = "SAFA HTTP daemon — axum wrapper for safa-core"
 

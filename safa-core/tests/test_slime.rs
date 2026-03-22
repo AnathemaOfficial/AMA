@@ -104,6 +104,7 @@ fn test_agent_registry_independent_capacity() {
             rate_limit_per_window: 60,
             rate_limit_window_secs: 60,
             domain_policies: domain_policies.clone(),
+            secret: None,
         },
         AgentConfig {
             agent_id: "agent_b".into(),
@@ -111,6 +112,7 @@ fn test_agent_registry_independent_capacity() {
             rate_limit_per_window: 60,
             rate_limit_window_secs: 60,
             domain_policies: domain_policies.clone(),
+            secret: None,
         },
     ];
 

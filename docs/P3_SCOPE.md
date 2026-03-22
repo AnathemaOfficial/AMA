@@ -1,8 +1,8 @@
 # SAFA P3 — Agent Containment & Verifiable Identity
 
-> Phase: **PLANNED**
+> Phase: **HELD** (v0.3.0-p3-held)
 > Predecessor: P2 HELD (v0.2.0-p2-held)
-> Target tag: `v0.3.0-p3-held`
+> Tag: `v0.3.0-p3-held`
 
 ---
 

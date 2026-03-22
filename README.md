@@ -20,7 +20,7 @@ Agent → SAFA → SLIME/AB-S → Real world actuation
 - **P1** hardened for concurrent use: idempotency races (C2), rate limiter races (C3), bounded admission, execution timeouts
 - **P2** introduced multi-agent capacity: workspace split, per-agent budgets, `X-Agent-Id` routing, per-agent rate limiters
 - **P3** sealed agent containment: HMAC identity binding, capability manifests with Proof-of-Constraint, per-agent workspace isolation with symlink detection (C1 fix)
-- **135+ tests**, clippy clean (`-D warnings`)
+- **100+ tests**, clippy clean (`-D warnings`)
 - Tags: `v0.1.0-p0-held`, `v0.1.0-p1-held`, `v0.2.0-p2-held`, `v0.3.0-p3-held`
 
 Known issues documented in [`docs/KNOWN_ISSUES_P1.md`](docs/KNOWN_ISSUES_P1.md).
@@ -121,7 +121,7 @@ See [`examples/`](examples/) for more.
 ## Tests
 
 ```bash
-cargo test --workspace --features test-utils    # 135+ tests
+cargo test --workspace --features test-utils    # 100+ tests
 cargo clippy --workspace --features test-utils -- -D warnings
 ```
 

@@ -1,7 +1,11 @@
 # SAFA P3 — Gap Analysis
 
+> **Status: HISTORICAL** — This document was the pre-implementation gap
+> analysis for P3. P3 is now **HELD** (v0.3.0-p3-held). All gaps
+> identified below have been resolved.
+
 > Baseline: `master` at P2 HELD (v0.2.0-p2-held)
-> Target: P3 HELD (v0.3.0-p3-held)
+> Resolved: P3 HELD (v0.3.0-p3-held)
 > Date: 2026-03-20
 
 ---

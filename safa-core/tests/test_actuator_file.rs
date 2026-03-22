@@ -19,6 +19,9 @@ fn writes_file_atomically() {
 #[test]
 fn write_creates_parent_dirs() {
     let dir = TempDir::new().unwrap();
+    // P3: Pre-create parent dirs since WorkspacePath now validates
+    // that the parent exists (canonicalize requires real path).
+    fs::create_dir_all(dir.path().join("a/b/c")).unwrap();
     let path = WorkspacePath::new("a/b/c/file.txt", dir.path()).unwrap();
     let content = BoundedBytes::new("nested".into(), 1_048_576).unwrap();
 

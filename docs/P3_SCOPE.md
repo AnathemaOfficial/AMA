@@ -79,7 +79,7 @@ hash is exposed in HTTP responses and via a dedicated endpoint.
   registered agent. Canonical JSON = keys sorted alphabetically, no
   extra whitespace, deterministic serialization. Store as `manifest_hash`
   in `AgentRegistry`.
-- Every `ActionResponse` includes header `X-Safa-Manifest-Hash`.
+- Every `ActionResponse` includes header `X-Safa-Policy-Hash`.
 - New endpoint: `GET /ama/manifest/{agent_id}` returns a `PublicManifest`
   (never exposes `secret` or internal fields):
   ```json
@@ -200,7 +200,7 @@ P3 is HELD when ALL of the following are true:
 - Manifest hash is deterministic (same config → same hash)
 - `/ama/manifest/{id}` returns correct hash
 - `/ama/proof/{id}` returns correct verdict + hash
-- `X-Safa-Manifest-Hash` header present in all responses
+- `X-Safa-Policy-Hash` header present in all responses
 
 ### Bypass Attempt Tests
 - Agent sends unexpected fields in JSON → rejected

@@ -70,7 +70,7 @@
 |------|--------|
 | `safa-core/src/slime.rs` | Compute `manifest_hash` per agent at registration |
 | `safa-core/src/schema.rs` | Add `manifest_hash` field to `ActionResponse`, add `PublicManifest` type (never exposes secret) |
-| `safa-daemon/src/server.rs` | Add `X-Safa-Manifest-Hash` response header |
+| `safa-daemon/src/server.rs` | Add `X-Safa-Policy-Hash` response header |
 | `safa-daemon/src/server.rs` | New route: `GET /ama/manifest/{agent_id}` |
 | `safa-daemon/src/server.rs` | New route: `GET /ama/proof/{request_id}` |
 | `safa-core/src/audit.rs` | Store verdict + manifest_hash per request_id |

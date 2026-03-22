@@ -1,3 +1,4 @@
+use safa_core::audit::ProofStore;
 use safa_core::config::AmaConfig;
 use safa_core::errors::AmaError;
 use safa_core::identity;
@@ -51,6 +52,7 @@ pub struct AppState {
     pub start_time: Instant,
     pub domain_counters: HashMap<String, AtomicU64>,
     pub agent_rate_limiters: HashMap<String, std::sync::Mutex<RateLimitState>>,
+    pub proof_store: ProofStore,
 }
 
 impl AppState {
@@ -91,6 +93,7 @@ impl AppState {
             start_time: Instant::now(),
             domain_counters,
             agent_rate_limiters,
+            proof_store: ProofStore::new(10_000),
             config,
         })
     }
@@ -101,6 +104,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/ama/action", post(handle_action))
         .route("/ama/status", get(handle_status))
         .route("/ama/manifest/{agent_id}", get(handle_manifest))
+        .route("/ama/proof/{request_id}", get(handle_proof))
         .route("/health", get(handle_health))
         .route("/version", get(handle_version))
         .layer(
@@ -278,6 +282,34 @@ async fn handle_manifest(
     }
 }
 
+/// P3: Proof-of-Constraint endpoint.
+/// Returns the verdict record for a past request, allowing any downstream
+/// product to verify that SAFA evaluated the action.
+async fn handle_proof(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Path(request_id): axum::extract::Path<String>,
+) -> Response {
+    match state.proof_store.get(&request_id) {
+        Some(record) => {
+            (
+                StatusCode::OK,
+                [("x-safa-policy-hash", record.manifest_hash.clone())],
+                Json(serde_json::to_value(&record).unwrap()),
+            ).into_response()
+        }
+        None => {
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({
+                    "status": "error",
+                    "error_class": "proof_not_found",
+                    "message": format!("no proof record for request_id: {}", request_id),
+                })),
+            ).into_response()
+        }
+    }
+}
+
 async fn handle_action(
     State(state): State<Arc<AppState>>,
     headers: axum::http::HeaderMap,
@@ -417,8 +449,9 @@ async fn handle_action(
         request,
         &state.config,
         authorizer,
-        action_id,
+        action_id.clone(),
         &state.session_id.to_string(),
+        Some(&agent_id),
     ).await;
 
     // 7. Build response and cache
@@ -426,6 +459,24 @@ async fn handle_action(
     let policy_hash = state.config.agents.get(&agent_id)
         .map(|ac| PublicManifest::from_agent_config(ac).hash().to_string())
         .unwrap_or_default();
+
+    // P3: Store proof record for Proof-of-Constraint endpoint
+    let verdict_str = match &result {
+        Ok(_) => "AUTHORIZED",
+        Err(_) => "IMPOSSIBLE",
+    };
+    let timestamp_epoch = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    state.proof_store.insert(safa_core::audit::ProofRecord {
+        request_id: action_id.clone(),
+        agent_id: agent_id.clone(),
+        action: action_name.clone(),
+        verdict: verdict_str.to_string(),
+        manifest_hash: policy_hash.clone(),
+        timestamp: timestamp_epoch.to_string(),
+    });
 
     match result {
         Ok(response) => {

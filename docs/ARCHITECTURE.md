@@ -189,7 +189,7 @@ be reused by another.
 | P0 | HELD (v0.1.0-p0-held) | Single-agent local baseline |
 | P1 | HELD (v0.1.0-p1-held) | Concurrent multi-agent hardening |
 | P2 | HELD (v0.2.0-p2-held) | Multi-agent capacity system, workspace split |
-| P3 | Planned | Identity binding, capability manifests, per-agent workspaces |
+| P3 | **HELD** (v0.3.0-p3-held) | Agent containment: HMAC identity binding, capability manifests with Proof-of-Constraint, per-agent workspace isolation (C1 fix) |
 
 ## References
 
@@ -197,5 +197,7 @@ be reused by another.
 - [Capacity Model](CAPACITY_MODEL.md)
 - [P1 HELD Summary](p1/SAFA_P1_HELD.md)
 - [Known Issues](KNOWN_ISSUES_P1.md)
+- [P3 Scope](P3_SCOPE.md)
+- [P3 Gap Analysis](P3_GAP_ANALYSIS.md)
 - [Concurrency Model](p1/SAFA_CONCURRENCY_MODEL.md)
 - [Idempotency State Machine](p1/SAFA_IDEMPOTENCY_STATE_MACHINE.md)

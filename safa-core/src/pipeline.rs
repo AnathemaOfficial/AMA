@@ -82,10 +82,11 @@ pub fn validate_field_exclusivity(request: &ActionRequest) -> Result<(), AmaErro
 }
 
 /// Canonicalize: construct type-safe newtypes from raw request.
-fn canonicalize(request: &ActionRequest, config: &AmaConfig) -> Result<CanonicalAction, AmaError> {
+/// P3: agent_id enables per-agent workspace isolation.
+fn canonicalize(request: &ActionRequest, config: &AmaConfig, agent_id: Option<&str>) -> Result<CanonicalAction, AmaError> {
     match request.action.as_str() {
         "file_write" => {
-            let path = WorkspacePath::new(&request.target, &config.workspace_root)?;
+            let path = WorkspacePath::new_with_agent(&request.target, &config.workspace_root, agent_id)?;
             let max_payload = config.domain_mappings
                 .get("file_write")
                 .and_then(|m| m.max_payload_bytes)
@@ -97,7 +98,7 @@ fn canonicalize(request: &ActionRequest, config: &AmaConfig) -> Result<Canonical
             Ok(CanonicalAction::FileWrite { path, content })
         }
         "file_read" => {
-            let path = WorkspacePath::new(&request.target, &config.workspace_root)?;
+            let path = WorkspacePath::new_with_agent(&request.target, &config.workspace_root, agent_id)?;
             Ok(CanonicalAction::FileRead { path })
         }
         "shell_exec" => {
@@ -125,7 +126,7 @@ fn canonicalize(request: &ActionRequest, config: &AmaConfig) -> Result<Canonical
                 let safe = SafeArg::new(raw_arg)?;
                 if let Some(validator) = intent_config.validators.get(i) {
                     if validator.as_str() == "relative_workspace_path" {
-                        WorkspacePath::new(raw_arg, &config.workspace_root)?;
+                        WorkspacePath::new_with_agent(raw_arg, &config.workspace_root, agent_id)?;
                     }
                 }
                 args.push(safe);
@@ -259,6 +260,7 @@ pub async fn process_action(
     authorizer: &dyn SlimeAuthorizer,
     action_id: String,
     session_id: &str,
+    agent_id: Option<&str>,
 ) -> Result<ActionResponse, AmaError> {
     let start = Instant::now();
 
@@ -269,7 +271,8 @@ pub async fn process_action(
     validate_field_exclusivity(&request)?;
 
     // 3. Canonicalize (construct newtypes — structural validation)
-    let canonical = canonicalize(&request, config)?;
+    //    P3: pass agent_id for per-agent workspace isolation
+    let canonical = canonicalize(&request, config, agent_id)?;
 
     // 4. Map to domain
     let mapping = map_action(&request.action, request.magnitude, config)?;

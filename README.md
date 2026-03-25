@@ -85,6 +85,8 @@ cargo clippy --workspace --features test-utils -- -D warnings
 | `docs/CAPACITY_MODEL.md` | two-layer capacity model |
 | `docs/THREAT_MODEL.md` | threat model and security invariants |
 | `docs/KNOWN_ISSUES_P1.md` | known issues and resolution status |
+| `docs/HELLO_WORLD_PACKAGING_CANDIDATE.md` | package-level Hello World candidate for the bounded adapter surface |
+| `docs/HELLO_WORLD_QUICKSTART.md` | validation flow for the hello-world demo agent |
 
 ## License
 

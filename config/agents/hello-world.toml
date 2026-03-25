@@ -1,0 +1,26 @@
+# Hello World demo agent - minimal bounded package surface
+# Use case: SAFA Hello World candidate validation only
+
+[agent]
+agent_id = "hello-world"
+max_capacity = 100
+rate_limit_per_window = 10
+rate_limit_window_secs = 60
+# Candidate package placeholder only. Replace for any non-demo deployment.
+secret = "safa-hello-world-agent-secret-2026-change-me"
+
+[agent.domains.fs_read_workspace]
+enabled = true
+max_magnitude_per_action = 20
+
+[agent.domains.fs_write_workspace]
+enabled = true
+max_magnitude_per_action = 10
+
+[agent.domains.proc_exec_bounded]
+enabled = false
+max_magnitude_per_action = 0
+
+[agent.domains.net_out_http]
+enabled = false
+max_magnitude_per_action = 0

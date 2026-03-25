@@ -6,8 +6,8 @@ agent_id = "developer"
 max_capacity = 50000
 rate_limit_per_window = 120
 rate_limit_window_secs = 60
-# P3: HMAC shared secret for identity binding (min 32 chars)
-secret = "safa-developer-agent-secret-key-2026-change-me"
+# P3: development placeholder only. Replace outside local development.
+secret = "dev-placeholder-secret-not-for-production"
 
 [agent.domains.fs_write_workspace]
 enabled = true

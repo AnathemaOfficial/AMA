@@ -7,7 +7,6 @@
 
 use safa_core::newtypes::WorkspacePath;
 use std::fs;
-use std::path::Path;
 
 fn setup_workspace() -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();

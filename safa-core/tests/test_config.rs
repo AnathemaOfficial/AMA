@@ -223,7 +223,7 @@ fn loads_agent_configs_from_agents_dir() {
     // Write config.toml WITHOUT slime.max_capacity and domains
     let workspace_root_escaped = ws.to_str().unwrap().replace('\\', "\\\\");
     fs::write(dir.path().join("config.toml"), format!(r#"
-[ama]
+[safa]
 workspace_root = "{workspace_root_escaped}"
 bind_host = "127.0.0.1"
 bind_port = 8787
@@ -305,7 +305,7 @@ fn write_test_configs(dir: &std::path::Path, workspace_root: &str) {
     // On Windows, backslashes in TOML strings must be escaped.
     let workspace_root_escaped = workspace_root.replace('\\', "\\\\");
     fs::write(dir.join("config.toml"), format!(r#"
-[ama]
+[safa]
 workspace_root = "{workspace_root_escaped}"
 bind_host = "127.0.0.1"
 bind_port = 8787

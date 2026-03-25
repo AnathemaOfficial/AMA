@@ -41,7 +41,7 @@ fn test_config() -> AmaConfig {
 
 fn write_test_configs(dir: &std::path::Path, workspace_root: &str) {
     fs::write(dir.join("config.toml"), format!(r#"
-[ama]
+[safa]
 workspace_root = "{workspace_root}"
 bind_host = "127.0.0.1"
 bind_port = 8787

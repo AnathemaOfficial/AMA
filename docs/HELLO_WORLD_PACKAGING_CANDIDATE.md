@@ -212,7 +212,7 @@ This candidate still leaves later work:
 
 The target chain is:
 
-`SLAPY -> SAFA -> SLIME-Enterprise -> actuator -> system effect`
+`SCLAPY -> SAFA -> SLIME-Enterprise -> actuator -> system effect`
 
 For now, this package proves the adapter surface on its own.
 The full appliance-integrated package remains the next layer.

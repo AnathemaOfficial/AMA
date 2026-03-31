@@ -88,6 +88,3 @@ cargo clippy --workspace --features test-utils -- -D warnings
 | `docs/HELLO_WORLD_PACKAGING_CANDIDATE.md` | package-level Hello World candidate for the bounded adapter surface |
 | `docs/HELLO_WORLD_QUICKSTART.md` | validation flow for the hello-world demo agent |
 
-## License
-
-Proprietary - SYFCORP.
